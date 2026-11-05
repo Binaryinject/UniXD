@@ -1,0 +1,19 @@
+{
+    "name": "BIEngine.UniXD.Loader",
+    "references": [
+        "GUID:a439073e6c93d4a5bbdeebbe28645a3f",
+        "GUID:d6721b411d01d4164ab0f01182ab0dfe",
+        "GUID:68550284b645f4b9894995579f34290a"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

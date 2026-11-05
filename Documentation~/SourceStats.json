@@ -1,0 +1,32 @@
+[
+  {
+    "module": "Core",
+    "files": 34,
+    "upstreamFiles": 30,
+    "added": 4,
+    "changed": 22,
+    "unchanged": 8,
+    "lines": 5326,
+    "upstreamLines": 3135
+  },
+  {
+    "module": "Xd",
+    "files": 40,
+    "upstreamFiles": 27,
+    "added": 13,
+    "changed": 16,
+    "unchanged": 11,
+    "lines": 7316,
+    "upstreamLines": 4414
+  },
+  {
+    "module": "Slicing",
+    "files": 4,
+    "upstreamFiles": 4,
+    "added": 0,
+    "changed": 2,
+    "unchanged": 2,
+    "lines": 295,
+    "upstreamLines": 295
+  }
+]

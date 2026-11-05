@@ -1,0 +1,1331 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using BIEngine.UniXD.Xd;
+using JetBrains.Annotations;
+using Unity.VectorGraphics;
+using UnityEngine;
+using BIEngine.UniXD.Xd.Parsing.Internal;
+
+namespace BIEngine.UniXD.Xd.Parsing
+{
+    public static class SvgUtil
+    {
+        public static readonly string[] Types =
+        {
+            PathElement.Name,
+            PolygonElement.Name,
+            RectElement.Name,
+            EllipseElement.Name,
+            LineElement.Name,
+            CircleElement.Name,
+            CompoundElement.Name,
+        };
+
+        public static bool IsAlphaOnly(XdObjectJson xdObject)
+        {
+            if (xdObject.Group != null)
+            {
+                if (xdObject.Group.Children.Any(x => !IsAlphaOnly(x))) return false;
+            }
+
+            var stroke = xdObject.Style?.Stroke;
+            if (stroke != null && stroke.Type != "none") return false;
+
+            var fill = xdObject.Style?.Fill;
+            if (fill != null && fill.Type != "none") return false;
+
+            return true;
+        }
+
+        public static string CreateSvg(XdObjectJson xdObject, [CanBeNull] Obb obb, bool allowEmpty, bool includeBitmaps = false)
+        {
+            var defs = new List<IDefElement>();
+            var body = CreateSvgLine(xdObject, defs, includeBitmaps);
+
+            if (!allowEmpty)
+            {
+                if (!(body is GroupElement)
+                    && ((body.Parameter.EnableFill == false || body.Parameter.Fill == null) &&
+                        (body.Parameter.EnableStroke == false || body.Parameter.Stroke == null)))
+                {
+                    return string.Empty;
+                }
+            }
+
+            body.Parameter.Transform = new Transform();
+            if (obb != null)
+            {
+                var rootForCalc = new RootElement
+                {
+                    Defs = defs.ToArray(),
+                    Body = body,
+                    Size = null,
+                };
+                var bounds = CalcBounds(rootForCalc.ToSvg());
+                if (bounds.width > 0.0001f && bounds.height > 0.0001f)
+                {
+                    body.Parameter.Transform.Value.Tx = -bounds.x;
+                    body.Parameter.Transform.Value.Ty = -bounds.y;
+                }
+            }
+
+            var root = new RootElement
+            {
+                Defs = defs.ToArray(),
+                Body = body,
+                Size = obb?.Size,
+            };
+            body.Parameter.Opacity = 1.0f;
+            return root.ToSvg();
+        }
+
+        public static Rect CalcBounds(string svg)
+        {
+            using (var reader = new StringReader(svg))
+            {
+                var sceneInfo = SVGParser.ImportSVG(reader, ViewportOptions.DontPreserve);
+                try
+                {
+                var tessOptions = SvgToPng.TessellationOptions;
+                var geometry = VectorUtils.TessellateScene(sceneInfo.Scene, tessOptions, sceneInfo.NodeOpacity);
+                var vertices = geometry.SelectMany(geom => geom.Vertices.Select(x => (geom.WorldTransform * x))).ToArray();
+                var bounds = VectorUtils.Bounds(vertices);
+                return bounds;
+                }
+                finally
+                {
+                    // Embedded bitmap fills belong to this temporary SVG scene.
+                    var textures = new HashSet<Texture2D>();
+                    CollectTextures(sceneInfo.Scene.Root, textures);
+                    foreach (var texture in textures) UnityEngine.Object.DestroyImmediate(texture);
+                }
+            }
+        }
+
+        private static void CollectTextures(SceneNode node, HashSet<Texture2D> textures)
+        {
+            if (node.Shapes != null)
+                foreach (var shape in node.Shapes)
+                    if (shape.Fill is TextureFill fill && fill.Texture != null) textures.Add(fill.Texture);
+            if (node.Children != null) foreach (var child in node.Children) CollectTextures(child, textures);
+        }
+
+        private static IElement CreateSvgLine(XdObjectJson xdObject, List<IDefElement> defs, bool includeBitmaps = false)
+        {
+            var id = xdObject.GetOriginalSimpleName().Replace(" ", "_");
+            var dataName = xdObject.GetOriginalSimpleName();
+            var shape = xdObject.Shape;
+
+            var parameter = new ElementParameter
+            {
+                Id = id.Replace("&", "")
+            };
+
+            parameter.Transform = new Transform { Value = xdObject.Transform };
+
+            var opacity = xdObject.Style?.Opacity;
+            parameter.Opacity = opacity;
+
+            if (xdObject.Group != null)
+            {
+                if (MaskGroupParser.Is(xdObject))
+                {
+                    var clipPathId = $"clip-path{defs.Count}";
+                    parameter.ClipPath = $"url(#{clipPathId})";
+                    var clipPathChildren = xdObject.Meta.Ux.ClipPathResources.Children.Select(x => CreateSvgLine(x, defs, includeBitmaps));
+                    defs.Add(new ClipPathDefElement { Id = clipPathId, Children = clipPathChildren.ToArray() });
+                }
+
+                parameter.DataName = dataName;
+                var blendMode = xdObject.Style?.BlendMode;
+                var isolation = xdObject.Style?.Isolation;
+                var children = xdObject.Group.Children.Where(x => !includeBitmaps || x.Visible != false).Select(x => CreateSvgLine(x, defs, includeBitmaps)).ToArray();
+                return new GroupElement { Parameter = parameter, Children = children, BlendMode = blendMode, Isolation = isolation };
+            }
+
+            var fill = xdObject.Style?.Fill;
+            parameter.EnableFill = true;
+            if (fill != null && fill.Type != "none")
+            {
+                var color = xdObject.Style.Fill.ToUnityColor();
+                parameter.Fill = color;
+
+                if (fill.Type == "solid")
+                {
+                    // nothing to do
+                }
+                else if (fill.Type == "gradient")
+                {
+                    if (fill.Gradient.Meta.Ux.GradientResources.Type == "linear")
+                    {
+                        var fillId = $"linear-gradient{defs.Count}";
+                        var gradient = fill.Gradient;
+                        // XD stores rectangle handles normalized by width/height, but
+                        // interpolates in local pixel space. SVG objectBoundingBox applies
+                        // a nonuniform transform to the gradient, skewing diagonal ramps.
+                        var localRectangle = shape?.Type == RectElement.Name && gradient.Units == "objectBoundingBox" && gradient.Transform == null;
+                        defs.Add(new LinearGradientDefElement
+                        {
+                            Id = fillId,
+                            X1 = gradient.X1 * (localRectangle ? shape.Width : 1f),
+                            X2 = gradient.X2 * (localRectangle ? shape.Width : 1f),
+                            Y1 = gradient.Y1 * (localRectangle ? shape.Height : 1f),
+                            Y2 = gradient.Y2 * (localRectangle ? shape.Height : 1f),
+                            Units = localRectangle ? "userSpaceOnUse" : gradient.Units,
+                            GradientTransform = gradient.Transform,
+                            Stops = fill.Gradient.Meta.Ux.GradientResources.Stops.Select(x => new GradientStop
+                            {
+                                Offset = x.Offset,
+                                StopColor = x.Color.ToUnityColor(),
+                            }).ToArray(),
+                        });
+                        parameter.FillUrl = fillId;
+                    }
+                    else if (fill.Gradient.Meta.Ux.GradientResources.Type == "radial")
+                    {
+                        var fillId = $"radial-gradient{defs.Count}";
+                        defs.Add(new RadialGradientDefElement
+                        {
+                            Id = fillId,
+                            Cx = fill.Gradient.Cx ?? 0.5f,
+                            Cy = fill.Gradient.Cy ?? 0.5f,
+                            Fx = fill.Gradient.Fx ?? 0.5f,
+                            Fy = fill.Gradient.Fy ?? 0.5f,
+                            R = fill.Gradient.R ?? 0.5f,
+                            Units = fill.Gradient.Units,
+                            GradientTransform = fill.Gradient.Transform,
+                            Stops = fill.Gradient.Meta.Ux.GradientResources.Stops.Select(x => new GradientStop
+                            {
+                                Offset = x.Offset,
+                                StopColor = x.Color.ToUnityColor(),
+                            }).ToArray(),
+                        });
+                        parameter.FillUrl = fillId;
+                    }
+                    else
+                    {
+                        XdImporter.Logger.Warning($"Unknown fill gradient type {fill.Gradient.Meta.Ux.GradientResources.Type} in {xdObject.Name}");
+                    }
+                }
+                else if (fill.Type == "pattern")
+                {
+                    parameter.Fill = Color.black;
+                    if (includeBitmaps)
+                    {
+                        var bytes = XdImporter.XdFile.GetResource(fill.Pattern.Meta);
+                        if (bytes == null) throw new InvalidDataException("合图图片资源不存在：" + xdObject.Name);
+                        var rect = CalcBounds(CreateSvg(xdObject, null, true));
+                        var meta = fill.Pattern.Meta.Ux;
+                        float w = rect.width, h = rect.height, x = rect.x, y = rect.y;
+                        if (meta.ScaleBehavior == "cover")
+                        {
+                            var aspect = fill.Pattern.Width / Mathf.Max(1, fill.Pattern.Height);
+                            w = rect.width * (meta.Scale ?? 1);
+                            h = w / Mathf.Max(.0001f, aspect);
+                            x += (rect.width - w) / 2 + rect.width * meta.OffsetX;
+                            y += (rect.height - h) / 2 + rect.width / Mathf.Max(.0001f, aspect) * meta.OffsetY;
+                        }
+                        var bitmapId = "bitmap" + defs.Count;
+                        string mime = bytes.Length > 1 && bytes[0] == 255 && bytes[1] == 216 ? "image/jpeg" : "image/png";
+                        var flip = FormattableString.Invariant($"translate({(meta.FlipX ? 2 * x + w : 0):R} {(meta.FlipY ? 2 * y + h : 0):R}) scale({(meta.FlipX ? -1 : 1)} {(meta.FlipY ? -1 : 1)})");
+                        defs.Add(new BitmapDef { Xml = FormattableString.Invariant($"<pattern id='{bitmapId}' patternUnits='userSpaceOnUse' x='{rect.x:R}' y='{rect.y:R}' width='{rect.width:R}' height='{rect.height:R}'><image x='{x:R}' y='{y:R}' width='{w:R}' height='{h:R}' preserveAspectRatio='none' transform='{flip}' xlink:href='data:{mime};base64,{Convert.ToBase64String(bytes)}'/></pattern>") });
+                        parameter.FillUrl = bitmapId;
+                    }
+                }
+                else
+                {
+                    XdImporter.Logger.Warning($"Unknown fill type {fill.Type} in {xdObject.Name}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(shape.Winding))
+                {
+                    parameter.FillRule = shape.Winding;
+                }
+            }
+
+            float? shapeR = null;
+            float[] corners = null;
+            if (shape.R != null)
+            {
+                if (shape.R is List<object> list)
+                {
+                    var floatArray = list.Select(x => (float) (double) x).ToArray();
+                    if (floatArray.All(x => Mathf.Approximately(floatArray[0], x))) shapeR = floatArray[0];
+                    else corners = floatArray;
+                }
+                else if (shape.R is double d)
+                {
+                    shapeR = (float) d;
+                }
+                else
+                {
+                    throw new NotSupportedException($"Unknown shape.r type {shape.R.GetType()}");
+                }
+            }
+
+            if (shapeR != null && shape.Type != CircleElement.Name)
+            {
+                parameter.Rx = shapeR;
+                if (parameter.Rx > shape.Width / 2f) parameter.Rx = shape.Width / 2f;
+                if (parameter.Rx > shape.Height / 2f) parameter.Rx = shape.Height / 2f;
+            }
+
+            var stroke = xdObject.Style?.Stroke;
+            string strokeAlign = null;
+            if (stroke != null && stroke.Type != "none")
+            {
+                parameter.EnableStroke = true;
+                parameter.Stroke = stroke.ToUnityColor();
+                parameter.StrokeWidth = stroke.Width;
+                parameter.StrokeMiterLimit = stroke.MiterLimit;
+
+                if (!string.IsNullOrWhiteSpace(stroke.Join))
+                {
+                    parameter.StrokeLinejoin = stroke.Join;
+                }
+
+                if (!string.IsNullOrWhiteSpace(stroke.Cap))
+                {
+                    parameter.StrokeLinecap = stroke.Cap;
+                }
+
+                if (stroke.Dash != null)
+                {
+                    parameter.StrokeDasharray = stroke.Dash;
+                }
+
+                // ReSharper disable once RedundantAssignment
+                if (stroke.Align == null) strokeAlign = null;
+                else if (stroke.Align == "outside") strokeAlign = "outside";
+                else if (stroke.Align == "inside") strokeAlign = "inside";
+                else throw new NotSupportedException($"{xdObject} has unknown align type {stroke.Align}");
+            }
+
+            if (shape.Type == PathElement.Name) return new PathElement { Parameter = parameter, D = shape.Path };
+
+            if (shape.Type == CompoundElement.Name) return new CompoundElement { Parameter = parameter, D = shape.Path };
+
+            if (shape.Type == LineElement.Name) return new LineElement { Parameter = parameter, X1 = shape.X1, Y1 = shape.Y1, X2 = shape.X2, Y2 = shape.Y2 };
+
+            if (shape.Type == PolygonElement.Name)
+            {
+                if (strokeAlign == "outside") return PolygonElement.Outside(dataName, shape, parameter);
+                if (strokeAlign == "inside") return PolygonElement.Inside(dataName, shape, parameter);
+                return PolygonElement.Basic(dataName, shape, parameter);
+            }
+
+            if (shape.Type == RectElement.Name)
+            {
+                if (strokeAlign == "outside") return RectElement.Outside(shape, parameter, corners);
+                if (strokeAlign == "inside") return RectElement.Inside(shape, parameter, corners);
+                return RectElement.Basic(shape, parameter, corners);
+            }
+
+            if (shape.Type == CircleElement.Name)
+            {
+                if (strokeAlign == "outside") return CircleElement.Outside(shape, parameter, shapeR.Value);
+                if (strokeAlign == "inside") return CircleElement.Inside(shape, parameter, shapeR.Value);
+                return CircleElement.Basic(shape, parameter, shapeR.Value);
+            }
+
+            if (shape.Type == EllipseElement.Name)
+            {
+                if (strokeAlign == "outside") return EllipseElement.Outside(shape, parameter);
+                if (strokeAlign == "inside") return EllipseElement.Inside(shape, parameter);
+                return EllipseElement.Basic(shape, parameter);
+            }
+
+            throw new NotSupportedException($"Unknown type {shape.Type}");
+        }
+
+        private static double ToCeilingString(float f)
+        {
+            // R関連はwidth=10, r=4.999とかになったときに変な線が出るため切り上げる
+            return Math.Ceiling(f * 1000.0) / 1000.0;
+        }
+
+        private interface IElement
+        {
+            ElementParameter Parameter { get; set; }
+            string ToSvg();
+        }
+
+        private class ElementParameter
+        {
+            public string Id { get; set; }
+            public string DataName { get; set; }
+            public string ClipPath { get; set; }
+            public float? X { get; set; }
+            public float? Y { get; set; }
+            public Transform Transform { get; set; } = new Transform();
+            public bool EnableFill { get; set; }
+            public Color? Fill { get; set; }
+            public string FillUrl { get; set; } // ColorのFillより優先される
+            public string FillRule { get; set; }
+            public bool EnableStroke { get; set; }
+            public Color? Stroke { get; set; }
+            public float? StrokeWidth { get; set; }
+            public float? StrokeMiterLimit { get; set; }
+            public string StrokeLinejoin { get; set; }
+            public string StrokeLinecap { get; set; }
+            public float[] StrokeDasharray { get; set; }
+            public float? Rx { get; set; }
+            public float? Opacity { get; set; }
+
+            public string GetString()
+            {
+                var parameters = new[]
+                {
+                    IdToSvg(),
+                    DataNameToSvg(),
+                    ClipPathToSvg(),
+                    XToSvg(),
+                    YToSvg(),
+                    Transform.ToSvg(),
+                    FillToSvg(),
+                    FillRuleToSvg(),
+                    StrokeToSvg(),
+                    StrokeWidthToSvg(),
+                    StrokeMiterLimitToSvg(),
+                    StrokeLinejoinToSvg(),
+                    StrokeLinecapToSvg(),
+                    StrokeDasharrayToSvg(),
+                    RxToSvg(),
+                    OpacityToSvg(),
+                }.Where(x => !string.IsNullOrWhiteSpace(x));
+                return string.Join(" ", parameters);
+            }
+
+            private string IdToSvg()
+            {
+                if (string.IsNullOrWhiteSpace(Id)) return null;
+                return $@"id=""{Id}""";
+            }
+
+            private string DataNameToSvg()
+            {
+                if (string.IsNullOrWhiteSpace(DataName)) return null;
+                return $@"data-name=""{DataName}""";
+            }
+
+            private string ClipPathToSvg()
+            {
+                if (string.IsNullOrWhiteSpace(ClipPath)) return null;
+                return $@"clip-path=""{ClipPath}""";
+            }
+
+            private string XToSvg()
+            {
+                if (X == null) return null;
+                return $@"x=""{X:0.###}""";
+            }
+
+            private string YToSvg()
+            {
+                if (Y == null) return null;
+                return $@"y=""{Y:0.###}""";
+            }
+
+            private string FillToSvg()
+            {
+                if (FillUrl != null) return $@"fill=""url(#{FillUrl})""";
+                if (!EnableFill) return null;
+                if (Fill == null) return @"fill=""none""";
+                return $@"fill=""{Fill.Value.ToSvgColorString()}""";
+            }
+
+            private string FillRuleToSvg()
+            {
+                if (FillUrl != null) return null;
+                if (!EnableFill) return null;
+                if (string.IsNullOrWhiteSpace(FillRule)) return null;
+                return $@"fill-rule=""{FillRule}""";
+            }
+
+            private string StrokeToSvg()
+            {
+                if (!EnableStroke) return null;
+                if (Stroke == null) return @"stroke=""none""";
+                return $@"stroke=""{Stroke.Value.ToSvgColorString()}""";
+            }
+
+            private string StrokeWidthToSvg()
+            {
+                if (!EnableStroke) return null;
+                if (StrokeWidth == null) return null;
+                return $@"stroke-width=""{StrokeWidth.Value:0.###}""";
+            }
+
+            private string StrokeMiterLimitToSvg()
+            {
+                if (!EnableStroke) return null;
+                if (StrokeMiterLimit == null) return null;
+                return $@"stroke-miterlimit=""{StrokeMiterLimit.Value:0.###}""";
+            }
+
+            private string StrokeLinejoinToSvg()
+            {
+                if (!EnableStroke) return null;
+                if (string.IsNullOrWhiteSpace(StrokeLinejoin)) return null;
+                return $@"stroke-linejoin=""{StrokeLinejoin}""";
+            }
+
+            private string StrokeLinecapToSvg()
+            {
+                if (!EnableStroke) return null;
+                if (string.IsNullOrWhiteSpace(StrokeLinecap)) return null;
+                return $@"stroke-linecap=""{StrokeLinecap}""";
+            }
+
+            private string StrokeDasharrayToSvg()
+            {
+                if (!EnableStroke) return null;
+                if (StrokeDasharray == null) return null;
+                return $@"stroke-dasharray=""{string.Join(" ", StrokeDasharray.Select(x => $"{x:0.###}"))}""";
+            }
+
+            private string RxToSvg()
+            {
+                if (Rx == null) return null;
+                return $@"rx=""{ToCeilingString(Rx.Value):0.###}""";
+            }
+
+            private string OpacityToSvg()
+            {
+                if (Opacity == null) return null;
+                if (Math.Abs(Opacity.Value - 1.0f) < 0.0001f) return null;
+                return $@"opacity=""{Opacity:0.###}""";
+            }
+        }
+
+        private class Transform
+        {
+            public XdTransformJson Value { get; set; } = new XdTransformJson
+            {
+                A = 1f,
+                B = 0f,
+                C = 0f,
+                D = 1f,
+                Tx = 0f,
+                Ty = 0f,
+            };
+
+            public string ToSvg()
+            {
+                if (Value == null) return null;
+                return $@"transform=""{ToSvg(Value)}""";
+            }
+
+            public static string ToSvg(XdTransformJson value)
+            {
+                if (
+                    Mathf.Abs(value.A - 1f) < 0.0001f
+                    && Mathf.Abs(value.B) < 0.0001f
+                    && Mathf.Abs(value.C) < 0.0001f
+                    && Mathf.Abs(value.D - 1f) < 0.0001f
+                )
+                {
+                    if (Math.Abs(value.Tx) < 0.0001f && Math.Abs(value.Ty) < 0.0001f) return null;
+                    return $@"translate({value.Tx:0.###} {value.Ty:0.###})";
+                }
+
+                if (
+                    Mathf.Abs(value.B) < 0.0001f
+                    && Mathf.Abs(value.C) < 0.0001f
+                )
+                {
+                    if (Math.Abs(value.Tx) < 0.0001f && Math.Abs(value.Ty) < 0.0001f) return null;
+                    return $@"translate({value.Tx:0.###} {value.Ty:0.###}) scale({value.A:0.###} {value.D:0.###})";
+                }
+
+                return $@"matrix({value.A:0.###}, {value.B:0.###}, {value.C:0.###}, {value.D:0.###}, {value.Tx:0.###}, {value.Ty:0.###})";
+            }
+        }
+
+        private interface IDefElement
+        {
+            string ToSvg();
+        }
+
+        private class ClipPathDefElement : IDefElement
+        {
+            public string Id { get; set; }
+            public IElement[] Children { get; set; }
+
+            public string ToSvg()
+            {
+                var children = string.Join("", Children.Select(x => x.ToSvg()));
+                return $@"<clipPath id=""{Id}"">{children}</clipPath>";
+            }
+        }
+
+        private class LinearGradientDefElement : IDefElement
+        {
+            public string Id { get; set; }
+            public float X1 { get; set; }
+            public float Y1 { get; set; }
+            public float X2 { get; set; }
+            public float Y2 { get; set; }
+            public string Units { get; set; }
+            public XdTransformJson GradientTransform { get; set; }
+            public GradientStop[] Stops { get; set; }
+
+            public string ToSvg()
+            {
+                var stops = string.Join("", Stops.Select(x => x.ToSvg()));
+                var transform = GradientTransform == null ? "" : $@" gradientTransform=""{Transform.ToSvg(GradientTransform)}""";
+                return $@"<linearGradient id=""{Id}"" x1=""{X1:R}"" x2=""{X2:R}"" y1=""{Y1:R}"" y2=""{Y2:R}"" gradientUnits=""{Units}""{transform}>{stops}</linearGradient>";
+            }
+        }
+
+        private class RadialGradientDefElement : IDefElement
+        {
+            public string Id { get; set; }
+            public float Cx { get; set; }
+            public float Cy { get; set; }
+            public float Fx { get; set; }
+            public float Fy { get; set; }
+            public float R { get; set; }
+            public string Units { get; set; }
+            public XdTransformJson GradientTransform { get; set; }
+            public GradientStop[] Stops { get; set; }
+
+            public string ToSvg()
+            {
+                var stops = string.Join("", Stops.Select(x => x.ToSvg()));
+                var transformJson = "";
+                if (GradientTransform != null)
+                {
+                    transformJson = $@"gradientTransform=""{Transform.ToSvg(GradientTransform)}""";
+                }
+                return $@"<radialGradient id=""{Id}"" cx=""{Cx:0.###}"" cy=""{Cy:0.###}"" fx=""{Fx:0.###}"" fy=""{Fy:0.###}"" r=""{ToCeilingString(R):0.###}"" {transformJson} gradientUnits=""{Units}"">{stops}</radialGradient>";
+            }
+        }
+
+        private class GradientStop
+        {
+            public float Offset { get; set; }
+            public Color StopColor { get; set; }
+
+            public string ToSvg()
+            {
+                return $@"<stop offset=""{Offset:0.###}"" stop-color=""{StopColor.ToSvgColorStringRgb()}"" stop-opacity=""{StopColor.a:0.###}""/>";
+            }
+        }
+
+        private sealed class BitmapDef : IDefElement
+        {
+            public string Xml;
+            public string ToSvg() => Xml;
+        }
+
+        private class RootElement : IElement
+        {
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public IDefElement[] Defs { get; set; } = { };
+            public IElement Body { get; set; }
+            public Vector2? Size { get; set; }
+
+            public string ToSvg()
+            {
+                var defsString = "";
+                if (Defs.Length > 0) defsString = $@"<defs>{string.Join("", Defs.Select(x => x.ToSvg()))}</defs>";
+
+                var sizeString = "";
+                if (Size != null) sizeString = $@"width=""{Size.Value.x:0.###}"" height=""{Size.Value.y:0.###}"" viewBox=""0 0 {Size.Value.x:0.###} {Size.Value.y:0.###}""";
+
+                var svg = $@"<svg xmlns=""http://www.w3.org/2000/svg"" xmlns:xlink=""http://www.w3.org/1999/xlink"" {sizeString}>{defsString}{Body.ToSvg()}</svg>";
+                return svg;
+            }
+        }
+
+        private class GroupElement : IElement
+        {
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public IElement[] Children { get; set; } = { };
+            public string BlendMode { get; set; }
+            public string Isolation { get; set; }
+
+            public string ToSvg()
+            {
+                var children = string.Join("", Children.Select(x => x.ToSvg()));
+
+                var style = new List<string>();
+                if (!string.IsNullOrWhiteSpace(BlendMode)) style.Add($"mix-blend-mode: {BlendMode}");
+                if (!string.IsNullOrWhiteSpace(Isolation)) style.Add($"isolation: {Isolation}");
+                var styleString = style.Count == 0 ? "" : $@"style=""{string.Join("; ", style)}""";
+
+                return $@"<g {styleString} {Parameter.GetString()}>{children}</g>";
+            }
+        }
+
+        private class PathElement : IElement
+        {
+            public const string Name = "path";
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public string D { get; set; } = "";
+
+            public string ToSvg()
+            {
+                return $@"<{Name} d=""{D}"" {Parameter.GetString()} />";
+            }
+
+            public static string GenerateD(params ID[] ds)
+            {
+                var stringBuilder = new StringBuilder();
+                foreach (var d in ds)
+                {
+                    stringBuilder.Append(d);
+                }
+                return stringBuilder.ToString();
+            }
+
+            public interface ID
+            {
+            }
+
+            public readonly struct M : ID
+            {
+                public float X { get; }
+                public float Y { get; }
+
+                public M(float x, float y)
+                {
+                    X = x;
+                    Y = y;
+                }
+
+                public override string ToString() => $"M{X:0.###},{Y:0.###}";
+            }
+
+            public readonly struct L : ID
+            {
+                public float X { get; }
+                public float Y { get; }
+
+                public L(float x, float y)
+                {
+                    X = x;
+                    Y = y;
+                }
+
+                public override string ToString() => $"L{X:0.###},{Y:0.###}";
+            }
+
+            // ReSharper disable once InconsistentNaming
+            public readonly struct l : ID
+            {
+                public float Dx { get; }
+                public float Dy { get; }
+
+                public l(float dx, float dy)
+                {
+                    Dx = dx;
+                    Dy = dy;
+                }
+
+                public override string ToString() => $"l{Dx:0.###},{Dy:0.###}";
+            }
+
+            public readonly struct H : ID
+            {
+                public float X { get; }
+
+                public H(float x)
+                {
+                    X = x;
+                }
+
+                public override string ToString() => $"H{X:0.###}";
+            }
+
+            public readonly struct V : ID
+            {
+                public float Y { get; }
+
+                public V(float y)
+                {
+                    Y = y;
+                }
+
+                public override string ToString() => $"V{Y:0.###}";
+            }
+
+            public readonly struct A : ID
+            {
+                public float Rx { get; }
+                public float Ry { get; }
+                public float Angle { get; }
+                public bool LargeArc { get; }
+                public bool Sweep { get; }
+                public float Dx { get; }
+                public float Dy { get; }
+
+                public A(float rx, float ry, float angle, bool largeArc, bool sweep, float dx, float dy)
+                {
+                    Rx = rx;
+                    Ry = ry;
+                    Angle = angle;
+                    LargeArc = largeArc;
+                    Sweep = sweep;
+                    Dx = dx;
+                    Dy = dy;
+                }
+
+                public override string ToString() => $"A{Rx:0.###},{Ry:0.###},{Angle:0.###},{(LargeArc ? 1 : 0)},{(Sweep ? 1 : 0)},{Dx:0.###},{Dy:0.###}";
+            }
+
+            // ReSharper disable once InconsistentNaming
+            public readonly struct a : ID
+            {
+                public float Rx { get; }
+                public float Ry { get; }
+                public float Angle { get; }
+                public bool LargeArc { get; }
+                public bool Sweep { get; }
+                public float Dx { get; }
+                public float Dy { get; }
+
+                public a(float rx, float ry, float angle, bool largeArc, bool sweep, float dx, float dy)
+                {
+                    Rx = rx;
+                    Ry = ry;
+                    Angle = angle;
+                    LargeArc = largeArc;
+                    Sweep = sweep;
+                    Dx = dx;
+                    Dy = dy;
+                }
+
+                public override string ToString() => $"a{Rx:0.###},{Ry:0.###},{Angle:0.###},{(LargeArc ? 1 : 0)},{(Sweep ? 1 : 0)},{Dx:0.###},{Dy:0.###}";
+            }
+
+            public readonly struct C : ID
+            {
+                public float X1 { get; }
+                public float Y1 { get; }
+                public float X2 { get; }
+                public float Y2 { get; }
+                public float X { get; }
+                public float Y { get; }
+
+                public C(float x1, float y1, float x2, float y2, float x, float y)
+                {
+                    X1 = x1;
+                    Y1 = y1;
+                    X2 = x2;
+                    Y2 = y2;
+                    X = x;
+                    Y = y;
+                }
+
+                public override string ToString() => $"C{X1:0.###},{Y1:0.###},{X2:0.###},{Y2:0.###},{X:0.###},{Y:0.###}";
+            }
+
+            // ReSharper disable once InconsistentNaming
+            public readonly struct c : ID
+            {
+                public float Dx1 { get; }
+                public float Dy1 { get; }
+                public float Dx2 { get; }
+                public float Dy2 { get; }
+                public float Dx { get; }
+                public float Dy { get; }
+
+                public c(float dx1, float dy1, float dx2, float dy2, float dx, float dy)
+                {
+                    Dx1 = dx1;
+                    Dy1 = dy1;
+                    Dx2 = dx2;
+                    Dy2 = dy2;
+                    Dx = dx;
+                    Dy = dy;
+                }
+
+                public override string ToString() => $"c{Dx1:0.###},{Dy1:0.###},{Dx2:0.###},{Dy2:0.###},{Dx:0.###},{Dy:0.###}";
+            }
+
+            public struct Z : ID
+            {
+                public override string ToString() => "Z";
+            }
+        }
+
+        private class CompoundElement : IElement
+        {
+            public const string Name = "compound";
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public string D { get; set; } = "";
+
+            public string ToSvg()
+            {
+                return $@"<{PathElement.Name} d=""{D}"" {Parameter.GetString()} />";
+            }
+        }
+
+        private static class PolygonElement
+        {
+            public const string Name = "polygon";
+
+            public static IElement Basic(string name, XdShapeJson shape, ElementParameter parameter)
+            {
+                var points = shape.Points.Select(x => new Vector2(x.X, x.Y)).ToArray();
+                var cornerRadius = shape.UxdesignCornerRadius ?? 0f;
+                var enableCornerRadius = !Mathf.Approximately(cornerRadius, 0f);
+                var dp = new List<PathElement.ID>();
+
+                if (enableCornerRadius)
+                {
+                    for (var i = 0; i < points.Length; ++i)
+                    {
+                        var currentPoint = i;
+                        var prevPoint = i - 1;
+                        var nextPoint = i + 1;
+                        var sweep = points.Length == shape.UxdesignCornerCount || i % 2 == 0;
+
+                        if (prevPoint < 0) prevPoint += points.Length;
+                        if (nextPoint >= points.Length) nextPoint -= points.Length;
+
+                        var vec1 = (points[prevPoint] - points[currentPoint]).normalized;
+                        var vec2 = (points[nextPoint] - points[currentPoint]).normalized;
+                        var angle = Vector2.Angle(
+                            vec1,
+                            vec2
+                        ) / 2f * Mathf.Deg2Rad;
+                        var s = cornerRadius / Mathf.Tan(angle);
+
+                        var startPoint = points[currentPoint] + vec1 * s;
+                        var endPoint = points[currentPoint] + vec2 * s;
+                        if (i == 0) dp.Add(new PathElement.M(startPoint.x, startPoint.y));
+                        else dp.Add(new PathElement.L(startPoint.x, startPoint.y));
+                        dp.Add(new PathElement.A(cornerRadius, cornerRadius, 0f, false, sweep, endPoint.x, endPoint.y));
+                    }
+                    dp.Add(new PathElement.Z());
+                }
+                else
+                {
+                    dp.Add(new PathElement.M(points[0].x, points[0].y));
+                    foreach (var a in points.Skip(1))
+                    {
+                        dp.Add(new PathElement.L(a.x, a.y));
+                    }
+                    dp.Add(new PathElement.Z());
+                }
+
+                return new PathElement
+                {
+                    D = PathElement.GenerateD(dp.ToArray()),
+                    Parameter = parameter,
+                };
+            }
+
+            public static IElement Outside(string name, XdShapeJson shape, ElementParameter parameter)
+            {
+                XdImporter.Logger.Warning($"Outside boarder of Polygon Object is not supported in {name}");
+                parameter.Rx = null;
+                return Basic(name, shape, parameter);
+            }
+
+            public static IElement Inside(string name, XdShapeJson shape, ElementParameter parameter)
+            {
+                XdImporter.Logger.Warning($"Inside boarder of Polygon Object is not supported in {name}");
+                parameter.Rx = null;
+                return Basic(name, shape, parameter);
+            }
+        }
+
+        private class RectElement : IElement
+        {
+            public const string Name = "rect";
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public float Width { get; set; }
+            public float Height { get; set; }
+
+            public string ToSvg()
+            {
+                return $@"<{Name} width=""{Width:0.###}"" height=""{Height:0.###}"" {Parameter.GetString()} />";
+            }
+
+            public static IElement Basic(XdShapeJson shape, ElementParameter parameter, float[] corners)
+            {
+                if (corners != null)
+                {
+                    return new PathElement { Parameter = parameter, D = PathElement.GenerateD(WithCornersPath(shape, corners, 0f, 0f)) };
+                }
+
+                return new RectElement { Parameter = parameter, Width = shape.Width, Height = shape.Height };
+            }
+
+            public static IElement Outside(XdShapeJson shape, ElementParameter parameter, float[] corners)
+            {
+                var strokeWidth = parameter.StrokeWidth ?? 1f;
+
+                if (corners != null)
+                {
+                    return new GroupElement
+                    {
+                        Parameter = parameter, Children = new IElement[]
+                        {
+                            new PathElement
+                            {
+                                Parameter = new ElementParameter
+                                {
+                                    EnableStroke = true,
+                                },
+                                D = PathElement.GenerateD(WithCornersPath(shape, corners, 0f, 0f))
+                            },
+                            new PathElement
+                            {
+                                Parameter = new ElementParameter
+                                {
+                                    EnableFill = true,
+                                },
+                                D = PathElement.GenerateD(WithCornersPath(shape, corners, strokeWidth / 2f, 0f))
+                            },
+                        }
+                    };
+                }
+
+                var rx = parameter.Rx;
+                parameter.Rx = null;
+                return new GroupElement
+                {
+                    Parameter = parameter, Children = new IElement[]
+                    {
+                        new RectElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableStroke = true,
+                                Rx = rx,
+                            },
+                            Width = shape.Width,
+                            Height = shape.Height,
+                        },
+                        new RectElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                X = -strokeWidth / 2f,
+                                Y = -strokeWidth / 2f,
+                                EnableFill = true,
+                                Rx = rx + strokeWidth / 2f,
+                            },
+                            Width = shape.Width + strokeWidth,
+                            Height = shape.Height + strokeWidth,
+                        },
+                    }
+                };
+            }
+
+            public static IElement Inside(XdShapeJson shape, ElementParameter parameter, float[] corners)
+            {
+                var strokeWidth = parameter.StrokeWidth ?? 1f;
+
+                if (corners != null)
+                {
+                    return new GroupElement
+                    {
+                        Parameter = parameter, Children = new IElement[]
+                        {
+                            new PathElement
+                            {
+                                Parameter = new ElementParameter
+                                {
+                                    EnableStroke = true,
+                                },
+                                D = PathElement.GenerateD(WithCornersPath(shape, corners, 0f, 0f))
+                            },
+                            new PathElement
+                            {
+                                Parameter = new ElementParameter
+                                {
+                                    EnableFill = true,
+                                },
+                                D = PathElement.GenerateD(WithCornersPath(shape, corners, 0f, strokeWidth / 2f))
+                            },
+                        }
+                    };
+                }
+
+                var rx = parameter.Rx;
+                parameter.Rx = null;
+                return new GroupElement
+                {
+                    Parameter = parameter, Children = new IElement[]
+                    {
+                        new RectElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableStroke = true,
+                                Rx = rx,
+                            },
+                            Width = shape.Width,
+                            Height = shape.Height,
+                        },
+                        new RectElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                X = strokeWidth / 2f,
+                                Y = strokeWidth / 2f,
+                                EnableFill = true,
+                                Rx = rx - strokeWidth / 2f,
+                            },
+                            Width = shape.Width - strokeWidth,
+                            Height = shape.Height - strokeWidth,
+                        },
+                    }
+                };
+            }
+
+            private static PathElement.ID[] WithCornersPath(XdShapeJson shape, float[] corners, float outer, float inner)
+            {
+                var dp = new List<PathElement.ID>();
+                dp.Add(new PathElement.M(Mathf.Max(corners[0], inner * 2), -outer + inner));
+                dp.Add(new PathElement.H(Mathf.Min(shape.Width - corners[1], shape.Width - inner * 2)));
+                dp.Add(new PathElement.a(
+                    Mathf.Max(corners[1] + outer - inner, inner),
+                    Mathf.Max(corners[1] + outer - inner, inner),
+                    0, false, true,
+                    Mathf.Max(corners[1] + outer - inner, inner),
+                    Mathf.Max(corners[1] + outer - inner, inner)
+                ));
+                dp.Add(new PathElement.V(Mathf.Min(shape.Height - corners[2], shape.Height - inner * 2)));
+                dp.Add(new PathElement.a(
+                    Mathf.Max(corners[2] + outer - inner, inner),
+                    Mathf.Max(corners[2] + outer - inner, inner),
+                    0, false, true,
+                    -Mathf.Max(corners[2] + outer - inner, inner),
+                    Mathf.Max(corners[2] + outer - inner, inner)
+                ));
+                if (Mathf.Approximately(corners[3], 0f))
+                {
+                    dp.Add(new PathElement.H(inner * 2));
+                    dp.Add(new PathElement.a(
+                        outer + inner,
+                        outer + inner,
+                        0, false, true,
+                        -outer - inner,
+                        -outer - inner
+                    ));
+                }
+                else
+                {
+                    dp.Add(new PathElement.H(corners[3]));
+                    dp.Add(new PathElement.A(
+                        corners[3] + outer - inner,
+                        corners[3] + outer - inner,
+                        0, false, true,
+                        -outer + inner,
+                        shape.Height - corners[3] - outer
+                    ));
+                }
+                dp.Add(new PathElement.V(Mathf.Max(corners[0], inner * 2)));
+                dp.Add(new PathElement.A(
+                    Mathf.Max(corners[0] + outer - inner, inner),
+                    Mathf.Max(corners[0] + outer - inner, inner),
+                    0, false, true,
+                    Mathf.Max(corners[0], inner * 2),
+                    -outer + inner
+                ));
+                dp.Add(new PathElement.Z());
+                return dp.ToArray();
+            }
+        }
+
+        private class CircleElement : IElement
+        {
+            public const string Name = "circle";
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public float Cx { get; set; }
+            public float Cy { get; set; }
+            public float R { get; set; }
+
+            public string ToSvg()
+            {
+                return $@"<{Name} cx=""{Cx:0.###}"" cy=""{Cy:0.###}"" r=""{ToCeilingString(R):0.###}"" {Parameter.GetString()} />";
+            }
+
+            public static IElement Basic(XdShapeJson shape, ElementParameter parameter, float shapeR)
+            {
+                return new CircleElement { Parameter = parameter, Cx = shape.Cx, Cy = shape.Cy, R = shapeR };
+            }
+
+            public static IElement Outside(XdShapeJson shape, ElementParameter parameter, float shapeR)
+            {
+                var strokeWidth = parameter.StrokeWidth ?? 1f;
+                return new GroupElement
+                {
+                    Parameter = parameter, Children = new IElement[]
+                    {
+                        new CircleElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableStroke = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            R = shapeR,
+                        },
+                        new CircleElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableFill = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            R = shapeR + strokeWidth / 2f,
+                        },
+                    }
+                };
+            }
+
+            public static IElement Inside(XdShapeJson shape, ElementParameter parameter, float shapeR)
+            {
+                var strokeWidth = parameter.StrokeWidth ?? 1f;
+                return new GroupElement
+                {
+                    Parameter = parameter, Children = new IElement[]
+                    {
+                        new CircleElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableStroke = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            R = shapeR,
+                        },
+                        new CircleElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableFill = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            R = shapeR - strokeWidth / 2f,
+                        },
+                    }
+                };
+            }
+        }
+
+        private class EllipseElement : IElement
+        {
+            public const string Name = "ellipse";
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public float Cx { get; set; }
+            public float Cy { get; set; }
+            public float Rx { get; set; }
+            public float Ry { get; set; }
+
+            public string ToSvg()
+            {
+                return $@"<{Name} cx=""{Cx:0.###}"" cy=""{Cy:0.###}"" rx=""{ToCeilingString(Rx):0.###}"" ry=""{ToCeilingString(Ry):0.###}"" {Parameter.GetString()} />";
+            }
+
+            public static IElement Basic(XdShapeJson shape, ElementParameter parameter)
+            {
+                return new EllipseElement { Parameter = parameter, Cx = shape.Cx, Cy = shape.Cy, Rx = shape.Rx, Ry = shape.Ry };
+            }
+
+            public static IElement Outside(XdShapeJson shape, ElementParameter parameter)
+            {
+                var strokeWidth = parameter.StrokeWidth ?? 1f;
+                return new GroupElement
+                {
+                    Parameter = parameter, Children = new IElement[]
+                    {
+                        new EllipseElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableStroke = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            Rx = shape.Rx,
+                            Ry = shape.Ry,
+                        },
+                        new EllipseElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableFill = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            Rx = shape.Rx + strokeWidth / 2f,
+                            Ry = shape.Ry + strokeWidth / 2f,
+                        },
+                    }
+                };
+            }
+
+            public static IElement Inside(XdShapeJson shape, ElementParameter parameter)
+            {
+                var strokeWidth = parameter.StrokeWidth ?? 1f;
+                return new GroupElement
+                {
+                    Parameter = parameter, Children = new IElement[]
+                    {
+                        new EllipseElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableStroke = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            Rx = shape.Rx,
+                            Ry = shape.Ry,
+                        },
+                        new EllipseElement
+                        {
+                            Parameter = new ElementParameter
+                            {
+                                EnableFill = true,
+                            },
+                            Cx = shape.Cx,
+                            Cy = shape.Cy,
+                            Rx = shape.Rx - strokeWidth / 2f,
+                            Ry = shape.Ry - strokeWidth / 2f,
+                        },
+                    }
+                };
+            }
+        }
+
+        private class LineElement : IElement
+        {
+            public const string Name = "line";
+            public ElementParameter Parameter { get; set; } = new ElementParameter();
+
+            public float X1 { get; set; }
+            public float Y1 { get; set; }
+            public float X2 { get; set; }
+            public float Y2 { get; set; }
+
+            public string ToSvg()
+            {
+                return $@"<{Name} x1=""{X1:0.###}"" y1=""{Y1:0.###}"" x2=""{X2:0.###}"" y2=""{Y2:0.###}"" {Parameter.GetString()} />";
+            }
+        }
+    }
+}

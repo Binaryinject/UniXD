@@ -1,0 +1,33 @@
+{
+  "name": "com.biengine.unixd",
+  "displayName": "UniXD",
+  "version": "1.0.0",
+  "unity": "6000.3",
+  "description": "Adobe XD to Unity uGUI: configurable prefab generation, PNG/SVG export, soft shadows, automatic 9-slicing and repeatable export recipes.",
+  "documentationUrl": "https://github.com/Binaryinject/UniXD#readme",
+  "changelogUrl": "https://github.com/Binaryinject/UniXD/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/Binaryinject/UniXD/blob/main/LICENSE",
+  "author": {
+    "url": "https://github.com/Binaryinject",
+    "name": "BIEngine"
+  },
+  "dependencies": {
+    "com.unity.ugui": "2.0.0",
+    "com.unity.vectorgraphics": "3.0.0-preview.7"
+  },
+  "keywords": [
+    "xd",
+    "ugui",
+    "svg",
+    "ui",
+    "9-slice"
+  ],
+  "type": "library",
+  "samples": [
+    {
+      "displayName": "Automatic 9-slicing",
+      "path": "Slicing/Samples~/Demo",
+      "description": "Upstream Auto9Slicer demo, with UniXD namespaces."
+    }
+  ]
+}

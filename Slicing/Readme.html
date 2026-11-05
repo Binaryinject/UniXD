@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>UniXD Slicing</title>
+    <link rel="stylesheet" href="ReadmeAssets/new.css">
+  </head>
+  <body>
+    <h1>UniXD Slicing</h1>
+    <p>Automatic 9-slicing for Unity. See the <a href="../README.md">UniXD manual</a> for installation and the full export workflow. Based on Auto9Slicer by kyubuns.</p>
+    <p><img src="ReadmeAssets/summary.gif" alt="image" width="800" height="auto"></p>
+
+    <h2>Simple Use</h2>
+    <p>Create Auto9SliceTester. Assets &gt; Create &gt; UniXD &gt; Slicing &gt; Tester</p>
+    <p><img src="ReadmeAssets/simple1.png" alt="image" width="600" height="auto"></p>
+    <p>Click `Run` to automatically slice the images in the same directory.</p>
+    <p><img src="ReadmeAssets/simple2.png" alt="image" width="600" height="auto"></p>
+
+    <h2>From Script</h2>
+    <p>Add it to your EditorScript so that it will be executed at your desired timing.</p>
+    <blockquote>
+      var slicedTexture = BIEngine.UniXD.Slicing.Slicer.Slice(texture, SliceOptions.Default);<br />
+      textureImporter.spriteBorder = slicedTexture.Border.ToVector4();<br />
+      File.WriteAllBytes(filePath, slicedTexture.Texture.EncodeToPNG());
+    </blockquote>
+
+    <h2>Contact</h2>
+    <ul>
+      <li><a href="https://kyubuns.dev/message.html" rel="noopener noreferrer" target="_blank">Message Form</a> (Please send in Japanese or English.)</li>
+      <li><a href="https://twitter.com/kyubuns" rel="noopener noreferrer" target="_blank">twitter</a></li>
+      <li><a href="https://kyubuns.dev/" rel="noopener noreferrer" target="_blank">https://kyubuns.dev/</a></li>
+    </ul>
+  </body>
+</html>

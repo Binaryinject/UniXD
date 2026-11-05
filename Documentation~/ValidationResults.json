@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-05",
+  "unity": "6000.3.27f1",
+  "platform": "Windows Editor",
+  "package": "com.biengine.unixd",
+  "source": "repository-root local UPM; compiled from source without legacy DLLs",
+  "compiledAssemblies": 14,
+  "checks": {
+    "pngSvgRoundTrip": 35,
+    "shiftNativeClicks": 13,
+    "realVectorGradients": 14,
+    "linearTransparencyAndSharing": 55,
+    "windowSearchAndPerformance": 118,
+    "softShadows": 239
+  },
+  "legacyMetadataAndSerializedFieldMigration": "passed",
+  "guids": {
+    "preserved": 230,
+    "retiredNestedPackageDescriptors": 2,
+    "duplicates": 0
+  },
+  "playerBuild": "not run",
+  "committedOrPushed": false
+}
