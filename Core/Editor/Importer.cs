@@ -224,17 +224,9 @@ namespace BIEngine.UniXD.Editor
 
                     if (asset is SpriteAsset)
                     {
-                        var texture = new Texture2D(2, 2);
-                        try
-                        {
-                            texture.LoadImage(bytes);
-                            userData["source_width"] = texture.width;
-                            userData["source_height"] = texture.height;
-                        }
-                        finally
-                        {
-                            Object.DestroyImmediate(texture);
-                        }
+                        var size = GetSourceImageSize(bytes);
+                        userData["source_width"] = size.x;
+                        userData["source_height"] = size.y;
                     }
 
                     // Triggers may set borders or replace an asset; keep loader descriptors immutable.
@@ -308,6 +300,28 @@ namespace BIEngine.UniXD.Editor
                 new ImportAssetsLog { Time = stopWatch.Elapsed.TotalSeconds, Import = importAssetNames.Count,
                     Skip = skipAssetNames.Count + layoutLoader.AssetsInfo.Assets.Length - allAssets.Count }
             );
+        }
+
+        private static Vector2Int GetSourceImageSize(byte[] bytes)
+        {
+            // PNG IHDR stores dimensions before compressed pixels. Do not decode and
+            // upload an entire texture just to read its size before the slicing stage.
+            if (bytes.Length >= 33 && bytes[0] == 137 && bytes[1] == 80 && bytes[2] == 78 && bytes[3] == 71 &&
+                bytes[4] == 13 && bytes[5] == 10 && bytes[6] == 26 && bytes[7] == 10 &&
+                bytes[8] == 0 && bytes[9] == 0 && bytes[10] == 0 && bytes[11] == 13 &&
+                bytes[12] == 73 && bytes[13] == 72 && bytes[14] == 68 && bytes[15] == 82)
+            {
+                var width = bytes[16] << 24 | bytes[17] << 16 | bytes[18] << 8 | bytes[19];
+                var height = bytes[20] << 24 | bytes[21] << 16 | bytes[22] << 8 | bytes[23];
+                if (width > 0 && height > 0) return new Vector2Int(width, height);
+            }
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            try
+            {
+                texture.LoadImage(bytes);
+                return new Vector2Int(texture.width, texture.height);
+            }
+            finally { Object.DestroyImmediate(texture); }
         }
 
         private static void ImportAsset(IAsset asset, string savePath, Dictionary<string, object> userData, IImportSettings importSettings, ImportLogger logger)
@@ -796,7 +810,7 @@ namespace BIEngine.UniXD.Editor
             _paths = paths;
             var config = new List<string>
             {
-                "UniXDFingerprint-v2", Application.unityVersion, EditorUserBuildSettings.activeBuildTarget.ToString(),
+                "UniXDFingerprint-v3", Application.unityVersion, EditorUserBuildSettings.activeBuildTarget.ToString(),
                 PlayerSettings.colorSpace.ToString(), settings.SpriteSaveScale.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 settings.AssetOutputDirectoryPath, settings.FontDirectoryPath, settings.PrefabOutputPath, settings.MetaOutputPath
             };

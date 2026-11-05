@@ -6,7 +6,7 @@
     "added": 4,
     "changed": 22,
     "unchanged": 8,
-    "lines": 5326,
+    "lines": 5341,
     "upstreamLines": 3135
   },
   {
@@ -21,12 +21,12 @@
   },
   {
     "module": "Slicing",
-    "files": 4,
+    "files": 5,
     "upstreamFiles": 4,
-    "added": 0,
+    "added": 1,
     "changed": 2,
     "unchanged": 2,
-    "lines": 295,
+    "lines": 481,
     "upstreamLines": 295
   }
 ]

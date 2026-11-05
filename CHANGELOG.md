@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fix tolerant nine-slicing incorrectly treating long RGB/alpha gradients as repeated stripes; bound the entire candidate run.
+- Preserve original encoded bytes when slicing makes no changes; avoid unnecessary PNG/JPEG encoding and output texture allocation.
+- Optimize managed exact comparisons, row copying, temporary mipmaps and PNG dimension reads; invalidate legacy processed-cache results.
+- Add optional Burst 1.8+ / Jobs acceleration for large exact-mode textures, with a managed fallback and no mandatory Burst dependency.
+- Add 12 portable slicing regressions and measured performance documentation.
+
 ## 1.0.0 — 2026-11-05
 
 - Consolidate AkyuiUnity, AkyuiUnity.Xd and Auto9Slicer into `com.biengine.unixd`.

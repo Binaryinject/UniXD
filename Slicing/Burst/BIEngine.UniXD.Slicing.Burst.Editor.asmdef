@@ -1,0 +1,14 @@
+{
+  "name": "BIEngine.UniXD.Slicing.Burst.Editor",
+  "rootNamespace": "BIEngine.UniXD.Slicing.Burst",
+  "references": [
+    "GUID:fffa68352b993439b8e78493c10bfc25",
+    "GUID:2665a8d13d1b3f18800f46e256720795"
+  ],
+  "includePlatforms": ["Editor"],
+  "defineConstraints": ["UNIXD_BURST_SUPPORT"],
+  "versionDefines": [
+    {"name": "com.unity.burst", "expression": "1.8.0", "define": "UNIXD_BURST_SUPPORT"}
+  ],
+  "autoReferenced": true
+}

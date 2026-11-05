@@ -1,16 +1,37 @@
 using System.Linq;
+using System.Runtime.CompilerServices;
 using UnityEngine;
+
+[assembly: InternalsVisibleTo("BIEngine.UniXD.Slicing.Burst.Editor")]
 
 namespace BIEngine.UniXD.Slicing
 {
 	public static class Slicer
 	{
+		internal static System.Func<Texture2D, SliceOptions, bool, (bool handled, SlicedTexture result)> accelerator { get; set; }
+
 		public static SlicedTexture Slice(Texture2D texture, SliceOptions options)
 		{
-			return (new Runner(texture, options).Run());
+			return Process(texture, options, false);
 		}
 
-		private class Runner
+		public static bool TrySlice(Texture2D texture, SliceOptions options, out SlicedTexture sliced)
+		{
+			sliced = Process(texture, options, true);
+			return sliced != null;
+		}
+
+		private static SlicedTexture Process(Texture2D texture, SliceOptions options, bool skipUnchanged)
+		{
+			if (accelerator != null)
+			{
+				var accelerated = accelerator(texture, options, skipUnchanged);
+				if (accelerated.handled) return accelerated.result;
+			}
+			return new Runner(texture, options).Run(skipUnchanged);
+		}
+
+		internal class Runner
 		{
 			private readonly Texture2D _texture;
 			private readonly SliceOptions _options;
@@ -24,12 +45,13 @@ namespace BIEngine.UniXD.Slicing
 				_options = options;
 			}
 
-			public SlicedTexture Run()
+			public SlicedTexture Run(bool skipUnchanged = false)
 			{
 				_width = _texture.width;
 				_height = _texture.height;
 				_pixels = _texture.GetPixels32();
-				for (var i = 0; i < _pixels.Length; ++i) _pixels[i] = _pixels[i].a > 0 ? _pixels[i] : (Color32) Color.clear;
+				for (var i = 0; i < _pixels.Length; ++i)
+					if (_pixels[i].a == 0) _pixels[i] = Color.clear;
 
 				var xDiffList = CalcDiffList(_width, _height, 1, _width);
 				var (xStart, xEnd) = CalcLine(xDiffList);
@@ -39,6 +61,7 @@ namespace BIEngine.UniXD.Slicing
 
 				var skipX = (xStart == 0 && xEnd == 0);
 				var skipY = (yStart == 0 && yEnd == 0);
+				if (skipUnchanged && skipX && skipY) return null;
 				var output = GenerateSlicedTexture(xStart, xEnd, yStart, yEnd, skipX, skipY);
 
 				var left = xStart;
@@ -65,6 +88,24 @@ namespace BIEngine.UniXD.Slicing
 			{
 				var diffList = new ulong[length];
 				diffList[0] = ulong.MaxValue;
+				if (_options.Tolerate == 0)
+				{
+					// Exact equality is transitive; stop at the first mismatch.
+					for (var i = 1; i < length; ++i)
+						for (var j = 0; j < lineLength; ++j)
+						{
+							var a = _pixels[(i - 1) * lineSeek + j * lineDelta];
+							var b = _pixels[i * lineSeek + j * lineDelta];
+							if (a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a) continue;
+							diffList[i] = 1;
+							break;
+						}
+					return diffList;
+				}
+				var minimum = new Color32[lineLength];
+				var maximum = new Color32[lineLength];
+				for (var j = 0; j < lineLength; ++j)
+					minimum[j] = maximum[j] = _pixels[j * lineDelta];
 
 				for (var i = 1; i < length; ++i)
 				{
@@ -72,11 +113,24 @@ namespace BIEngine.UniXD.Slicing
 					var current = i * lineSeek;
 					for (var j = 0; j < lineLength; ++j)
 					{
-						var prev = current - lineSeek;
-						diff += (ulong) Diff(_pixels[prev], _pixels[current]);
+						var pixel = _pixels[current];
+						var low = minimum[j];
+						var high = maximum[j];
+						low = new Color32((byte) Mathf.Min(low.r, pixel.r), (byte) Mathf.Min(low.g, pixel.g),
+							(byte) Mathf.Min(low.b, pixel.b), (byte) Mathf.Min(low.a, pixel.a));
+						high = new Color32((byte) Mathf.Max(high.r, pixel.r), (byte) Mathf.Max(high.g, pixel.g),
+							(byte) Mathf.Max(high.b, pixel.b), (byte) Mathf.Max(high.a, pixel.a));
+						minimum[j] = low;
+						maximum[j] = high;
+						// Bound the whole run, not each adjacent step: otherwise a smooth
+						// gradient can drift arbitrarily far while every step passes tolerance.
+						if (Diff(low, high) != 0) { diff = 1; break; }
 						current += lineDelta;
 					}
 					diffList[i] = diff;
+					if (diff != 0)
+						for (var j = 0; j < lineLength; ++j)
+							minimum[j] = maximum[j] = _pixels[i * lineSeek + j * lineDelta];
 				}
 
 				return diffList;
@@ -95,7 +149,7 @@ namespace BIEngine.UniXD.Slicing
 				return rd + gd + bd + ad;
 			}
 
-			private (int Start, int End) CalcLine(ulong[] list)
+			internal (int Start, int End) CalcLine(ulong[] list)
 			{
 				var start = 0;
 				var end = 0;
@@ -142,24 +196,24 @@ namespace BIEngine.UniXD.Slicing
 				var outputWidth = _width - (xEnd - xStart) + (skipX ? 0 : _options.CenterSize - 1);
 				var outputHeight = _height - (yEnd - yStart) + (skipY ? 0 : _options.CenterSize - 1);
 				var outputPixels = new Color32[outputWidth * outputHeight];
-				for (int x = 0, originalX = 0; x < outputWidth; ++x, ++originalX)
+				if (skipX && skipY) System.Array.Copy(_pixels, outputPixels, _pixels.Length);
+				else for (var y = 0; y < outputHeight; ++y)
 				{
-					if (originalX == xStart && !skipX) originalX += (xEnd - xStart) - _options.CenterSize + 1;
-					for (int y = 0, originalY = 0; y < outputHeight; ++y, ++originalY)
+					var originalY = y + (!skipY && y >= yStart ? (yEnd - yStart) - _options.CenterSize + 1 : 0);
+					var sourceRow = originalY * _width;
+					var outputRow = y * outputWidth;
+					if (skipX) System.Array.Copy(_pixels, sourceRow, outputPixels, outputRow, outputWidth);
+					else
 					{
-						if (originalY == yStart && !skipY) originalY += (yEnd - yStart) - _options.CenterSize + 1;
-						outputPixels[y * outputWidth + x] = Get(originalX, originalY);
+						System.Array.Copy(_pixels, sourceRow, outputPixels, outputRow, xStart);
+						var sourceX = xEnd - _options.CenterSize + 1;
+						System.Array.Copy(_pixels, sourceRow + sourceX, outputPixels, outputRow + xStart, outputWidth - xStart);
 					}
 				}
 
 				var output = new Texture2D(outputWidth, outputHeight);
 				output.SetPixels32(outputPixels);
 				return output;
-			}
-
-			private Color32 Get(int x, int y)
-			{
-				return _pixels[y * _width + x];
 			}
 		}
 	}

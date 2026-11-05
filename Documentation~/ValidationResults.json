@@ -13,6 +13,19 @@
     "windowSearchAndPerformance": 118,
     "softShadows": 239
   },
+  "slicingUpdate": {
+    "burst": "1.8.31 (optional)",
+    "nativeChecks": 81,
+    "publicEditModeTestsPassed": 12,
+    "publicEditModeTestsSkipped": 0,
+    "sourcePackageWithoutBurst": "passed",
+    "rerunPngSvgRoundTrip": 35,
+    "rerunSoftShadows": 239,
+    "photoSliceWarmMedianMs": { "legacyCSharp": 408.52, "cSharp": 68.14, "burst": 31.48 },
+    "photoTrySliceUnchangedMs": 5.47,
+    "photoFullTriggerWarmMedianMs": 182.49,
+    "timingScope": "Windows Editor, same process, 3-run warm medians; not whole-export speedup; cold Burst compilation varies"
+  },
   "legacyMetadataAndSerializedFieldMigration": "passed",
   "guids": {
     "preserved": 230,

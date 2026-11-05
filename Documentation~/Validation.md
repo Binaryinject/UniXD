@@ -28,6 +28,12 @@
 
 测试使用宿主提供的 XD 和字体夹具；它们不随公开工具包分发。机器可读摘要见 [ValidationResults.json](ValidationResults.json)。
 
-## 未覆盖的内容
+## 切片正确性与可选加速
+
+2026-11-05：修复非零容差的渐变累计误判，增加可选 Burst 1.8+ / Jobs 后端，并减少未切片图片的分配及编码。原生专项81项、公开 EditMode 测试12项全部通过，覆盖渐变、合法九宫格、四种像素格式的 CPU/Burst 一致性、输入只读、无需切片时保留原字节以及 PNG/JPEG 尺寸读取。未安装 Burst 的独立源包工程也通过编译及 C# 后备路径检查。本轮复跑 PNG/SVG 35项、软阴影239项均通过。可选后端为第8个自有程序集，不改变迁移阶段14个程序集的统计口径。
+
+测试源码见 `Tests~/Editor`：将该目录复制到测试工程 `Assets/UniXDTests`，安装 Unity Test Framework，运行 EditMode 测试。Burst 专项在未安装 Burst 时跳过。实测环境、首次编译限制和性能口径见 [SlicingPerformance.md](SlicingPerformance.md)。
+
+## 验证边界
 
 未声称验证所有 Unity 版本、所有 XD 特效、自定义多 Pass Shader、所有字体或所有移动 GPU。项目框架的业务场景、服务器、真机 IL2CPP、发布包与热更新基线不属于这个工具仓库的通用测试产物。运行时程序集改名后，具体项目应重建自己的主包及相关裁剪/热更新生成物。

@@ -1,0 +1,8 @@
+{
+  "name": "BIEngine.UniXD.Tests.Editor",
+  "rootNamespace": "BIEngine.UniXD.Tests",
+  "references": ["BIEngine.UniXD", "BIEngine.UniXD.Loader", "BIEngine.UniXD.Editor", "BIEngine.UniXD.Extensions", "BIEngine.UniXD.Slicing.Editor"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

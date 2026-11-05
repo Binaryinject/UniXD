@@ -58,26 +58,27 @@ namespace BIEngine.UniXD.Extensions
                 return;
             }
 
-            var texture = new Texture2D(2, 2);
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
             SlicedTexture sliced = null;
             try
             {
                 texture.LoadImage(bytes);
-                sliced = Slicer.Slice(texture, options);
-                if (extension == ".png") bytes = sliced.Texture.EncodeToPNG();
-                if (extension == ".jpg" || extension == ".jpeg") bytes = sliced.Texture.EncodeToJPG();
+                var changed = Slicer.TrySlice(texture, options, out sliced);
+                if (changed && extension == ".png") bytes = sliced.Texture.EncodeToPNG();
+                if (changed && (extension == ".jpg" || extension == ".jpeg")) bytes = sliced.Texture.EncodeToJPG();
+                var border = changed ? sliced.Border : new BIEngine.UniXD.Slicing.Border(0, 0, 0, 0);
 
                 if (bytes.Length <= MaxCachedBytes - _cachedBytes)
                 {
-                    _cache[cacheKey] = new CachedSlice { Bytes = (byte[]) bytes.Clone(), Border = sliced.Border };
+                    _cache[cacheKey] = new CachedSlice { Bytes = (byte[]) bytes.Clone(), Border = border };
                     _cachedBytes += bytes.Length;
                 }
 
                 spriteAsset.Border = new Border(
-                    sliced.Border.Top,
-                    sliced.Border.Right,
-                    sliced.Border.Bottom,
-                    sliced.Border.Left
+                    border.Top,
+                    border.Right,
+                    border.Bottom,
+                    border.Left
                 );
             }
             finally

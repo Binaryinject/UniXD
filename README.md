@@ -56,7 +56,7 @@ https://github.com/Binaryinject/UniXD.git
 | 自动化 | 自定义导出脚本 | JSON 导出配置、源 XD 摘要核对、稳定 ID 审核计划与配置快照 |
 | 大列表 | 常规编辑器控件 | 图层解析及预览缓存、严格搜索、按视口绘制可见行 |
 
-按 2026-11-05 获取的上游源码对比，排除内置 Utf8Json 后，三个模块从 **61 个 C# 文件扩展到 78 个**，新增 **17 个 C# 文件**，另有 **40 个原有 C# 文件发生变化**；源码由 7,844 行增加到 12,937 行，净增约 5,093 行。这是源码规模统计，包含命名、兼容和整理，不等同于独立功能数量。
+按 2026-11-05 获取的上游源码对比，排除内置 Utf8Json 和独立测试后，三个模块从 **61 个 C# 文件扩展到 79 个**，新增 **18 个 C# 文件**，另有 **40 个原有 C# 文件发生变化**；源码由 7,844 行增加到 13,138 行，净增约 5,294 行。这是源码规模统计，包含命名、兼容和整理，不等同于独立功能数量。
 
 对照基线及统计口径见 [原版差异说明](Documentation~/UpstreamComparison.md)。
 
@@ -175,6 +175,22 @@ System.IO.File.WriteAllBytes(outputPath, result.Texture.EncodeToPNG());
 
 该 API 运行在 Editor；写回图片后请按项目的资源流程重新导入。
 
+九宫格会缩小纹理文件，再由 Image/Sliced 按 Border 还原；不能仅根据看图软件中的压缩 PNG 判断实际构图。照片、插画和缓慢变化的渐变建议使用 **Tolerate = 0**（默认值），需要强制保留源图时，在 **XD 源位图图层名**后添加 `@NoSlice`。非零容差允许近似，不保证逐像素无损；当前算法按整段颜色范围约束容差，避免相邻色差累积导致误切。
+
+导出 Trigger 使用 `Slicer.TrySlice(texture, options, out sliced)`。不需要切片时返回 false，不创建输出纹理，保留输入 PNG/JPEG 原始字节并跳过重编码；`Slicer.Slice` 的旧有返回完整纹理行为仍然保留。
+
+## 切片性能与可选 Burst / Jobs
+
+安装并启用 **Burst 1.8+** 后，包内的可选 `BIEngine.UniXD.Slicing.Burst.Editor` 自动启用。当前验证版本为 **1.8.31**。它不增加 UniXD 的必需依赖，也不需要 ECS。
+
+- 仅对至少 **1024 × 1024 像素总量**、容差 0、可读的 RGB24/RGBA32/ARGB32/BGRA32 输入启用 Jobs。
+- 并行检查重复行列、并行拷贝输出行；直接读取纹理的原生像素缓冲，避免两份整图托管数组。
+- 小图、非零容差、其他像素格式、未安装或关闭 Burst 时，使用 C# 后备。
+- C# 路径也有精确比较早停和连续内存行拷贝优化；PNG 尺寸直接读取 IHDR，其他格式保留解码后备。
+- 不切片的原图跳过 PNG/JPEG 重编码，缓存策略版本更新后不会继续复用旧的误切结果。
+
+本机 Unity Editor 热态实测：2560² 插画完整切片计算由旧实现约 409ms 降至 C# 约 68ms、Burst 约 31ms；使用 TrySlice 判定无需切片约 5ms。不同硬件、缓存和图片内容会影响结果，首次 Burst 编译另有成本，以上不是整个导出过程的加速比例。测试口径及编码耗时见 [性能与正确性说明](Documentation~/SlicingPerformance.md)。
+
 ## 软阴影、渐变与透明混合
 
 ### XD 软阴影
@@ -260,6 +276,7 @@ XdImporter.Import(settings, xdPath, selectedManifestPaths);
 | `BIEngine.UniXD.Xd.Editor` | `Xd/Editor` | Editor |
 | `BIEngine.UniXD.Xd.Extensions` | `Xd/Extensions` | Editor |
 | `BIEngine.UniXD.Slicing.Editor` | `Slicing/Editor` | Editor |
+| `BIEngine.UniXD.Slicing.Burst.Editor` | `Slicing/Burst` | Editor，可选，安装 Burst 后启用 |
 | `Utf8Json` | `Core/Loader/Libraries/Utf8Json` | Editor，保留上游名称与命名空间 |
 
 `Xd/Runtime/Shaders` 存放运行时使用的 Shader；编辑器导出代码不会因此进入 Player。运行时可能包含元数据组件和 SVG Canvas 通道辅助组件，因此不宣称导出产物“完全没有运行时组件”。
@@ -279,6 +296,8 @@ XdImporter.Import(settings, xdPath, selectedManifestPaths);
 ## 验证范围与边界
 
 已在 Unity 6.3 环境验证真实 XD 按钮阴影、PNG/SVG 切换、对象引用、重复导出、Linear/Gamma 混合、TMP、裁剪、共享材质、Shift 原生点击及大列表窗口。迁移验证记录见 [验证说明](Documentation~/Validation.md)。
+
+可复用的切片回归位于 `Tests~/Editor`。将该目录复制到测试工程 `Assets/UniXDTests`，安装 Unity Test Framework 后，在 EditMode 运行 `BIEngine.UniXD.Tests.SlicingTests`；无需商业 XD 或字体夹具。未安装 Burst 时，专门比较 Burst 的用例会跳过。
 
 这不是所有 XD 效果、所有 Unity 版本和所有自定义 Shader 的全面兼容承诺。复杂设计稿应先选择代表画板核对；字体替换、动态背景、透明组叠加和项目自定义 Trigger 尤其需要检查。导出器生成资源和组件结构，不生成网络、业务逻辑或虚拟列表的数据绑定。
 
