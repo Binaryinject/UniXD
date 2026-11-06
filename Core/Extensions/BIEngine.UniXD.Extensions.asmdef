@@ -33,6 +33,11 @@
       "name": "Unity",
       "expression": "2023.2",
       "define": "UNIXD_TEXTMESHPRO_SUPPORT"
+    },
+    {
+      "name": "com.kyrylokuzyk.primetween",
+      "expression": "",
+      "define": "UNIXD_PRIMETWEEN_SUPPORT"
     }
   ],
   "noEngineReferences": false

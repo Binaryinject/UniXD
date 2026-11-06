@@ -19,6 +19,7 @@ namespace BIEngine.UniXD.Xd
             internal GUIContent pathContent, exportContent, componentContent;
             internal string renameControl;
             internal float height;
+            internal float titleWidth;
         }
 
         private readonly Dictionary<string, XdObjectJson> m_ResolvedNodes = new Dictionary<string, XdObjectJson>();
@@ -34,7 +35,7 @@ namespace BIEngine.UniXD.Xd
         {
             components = components ?? "";
             string key, description;
-            if (components.Contains("ScrollRect") || components.Contains("OSA"))
+            if (components.Contains("ScrollRect") || components.Contains("OSA") || components.Contains("ListAdapter") || components.Contains("GridAdapter"))
             {
                 key = "ScrollRect Icon";
                 description = (mode == XdScrollViewMode.Osa ? "OSA" : "ScrollRect") + (scrollingType == "vertical" ? " · 纵向滚动" : " · 横向滚动");
@@ -68,6 +69,34 @@ namespace BIEngine.UniXD.Xd
         private GUIStyle m_RowMutedStyle;
         private bool m_RowStyleDark;
         private int m_DisplayBuildCount, m_VisibleBuildCount, m_LastDrawnRows;
+        private bool m_MarqueeVisible;
+        private double m_MarqueeEpoch, m_LastMarqueeGui, m_NextMarqueeRepaint;
+        private GUIStyle m_TreeTitleStyle;
+
+        private void OnEnable() {
+            m_MarqueeEpoch = EditorApplication.timeSinceStartup;
+            EditorApplication.update += RepaintMarquee;
+        }
+        private void OnDisable() => EditorApplication.update -= RepaintMarquee;
+        private void RepaintMarquee() {
+            var now = EditorApplication.timeSinceStartup;
+            if (!m_MarqueeVisible || now - m_LastMarqueeGui > 1 || now < m_NextMarqueeRepaint) return;
+            m_NextMarqueeRepaint = now + 1d / 24;
+            Repaint();
+        }
+
+        private void DrawTreeTitle(Rect rect, EntryView view) {
+            if (m_TreeTitleStyle == null) m_TreeTitleStyle = new GUIStyle(EditorStyles.label) { wordWrap = false, clipping = TextClipping.Clip };
+            if (view.titleWidth <= rect.width) { GUI.Label(rect, view.title, m_TreeTitleStyle); return; }
+            m_MarqueeVisible = true;
+            var period = view.titleWidth + 40f;
+            var phase = (float)((EditorApplication.timeSinceStartup - m_MarqueeEpoch) % (1.5 + period / 28));
+            var offset = Mathf.Max(0, phase - 1.5f) * 28;
+            GUI.BeginClip(rect);
+            GUI.Label(new Rect(-offset, 0, view.titleWidth, rect.height), view.title, m_TreeTitleStyle);
+            GUI.Label(new Rect(period - offset, 0, view.titleWidth, rect.height), view.title, m_TreeTitleStyle);
+            GUI.EndClip();
+        }
         private static float lineHeight => EditorGUIUtility.singleLineHeight + 2f;
         private static readonly GUIContent m_OmitLabel = new GUIContent("不导出", "跳过此节点及其子节点。");
         private static readonly GUIContent m_RenderLabel = new GUIContent("渲染方式", "纯矢量可保留为 SVGImage；选择合并阴影时输出包含阴影的 PNG。");
@@ -133,7 +162,8 @@ namespace BIEngine.UniXD.Xd
                 XdExportRules.TryGetFinalLayerName(names, entry.Id, out view.exported);
                 view.exported = view.exported ?? Preview(entry.Name.Split('@')[0], view.manual);
                 view.path = string.Join(" / ", entry.Ancestors.Select(id => sourceNames.TryGetValue(id, out var name) ? name : id).Concat(new[] { entry.Name }));
-                view.title = new GUIContent(entry.Name, view.path);
+                view.title = new GUIContent(entry.Name.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' '), view.path);
+                view.titleWidth = EditorStyles.label.CalcSize(view.title).x;
                 view.pathContent = new GUIContent(view.path, view.path);
                 view.renameControl = "XdLayerName_" + entry.Id;
                 view.vectorEligible = m_VectorEligible.TryGetValue(entry.Id, out var eligible) && eligible;
@@ -218,6 +248,8 @@ namespace BIEngine.UniXD.Xd
 
         private void DrawRows(Rect viewport)
         {
+            m_MarqueeVisible = false;
+            m_LastMarqueeGui = EditorApplication.timeSinceStartup;
             XdEditorStyles.Ensure();
             if (m_RowMutedStyle == null || m_RowStyleDark != EditorGUIUtility.isProSkin)
             {
@@ -270,7 +302,7 @@ namespace BIEngine.UniXD.Xd
             }
             var oldColor = GUI.color;if(view.covered||view.omitted)GUI.color=Color.gray;
             GUI.Label(new Rect(x+15,y,16,18),view.icon);
-            GUI.Label(new Rect(x+34,y,Mathf.Max(20,270-x-34),18),view.title,EditorStyles.label);GUI.color=oldColor;
+            DrawTreeTitle(new Rect(x+34,y,Mathf.Max(20,270-x-34),18),view);GUI.color=oldColor;
             if(entry.Supported)
                 using(new EditorGUI.DisabledScope(!CanToggleMerge(entry))) {
                     var range=Event.current.shift;var chosen=EditorGUI.Toggle(new Rect(284,y,18,18),view.chosen);

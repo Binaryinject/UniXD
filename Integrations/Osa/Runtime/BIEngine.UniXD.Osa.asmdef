@@ -1,0 +1,13 @@
+{
+  "name": "BIEngine.UniXD.Osa",
+  "references": [
+    "OSA.Core",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [],
+  "defineConstraints": [
+    "UNIXD_OSA_SUPPORT"
+  ],
+  "versionDefines": [],
+  "autoReferenced": true
+}

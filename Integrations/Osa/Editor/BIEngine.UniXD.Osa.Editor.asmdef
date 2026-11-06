@@ -1,0 +1,20 @@
+{
+  "name": "BIEngine.UniXD.Osa.Editor",
+  "references": [
+    "OSA.Core",
+    "UnityEngine.UI",
+    "BIEngine.UniXD",
+    "BIEngine.UniXD.Loader",
+    "BIEngine.UniXD.Editor",
+    "BIEngine.UniXD.Extensions",
+    "BIEngine.UniXD.Osa"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "defineConstraints": [
+    "UNIXD_OSA_SUPPORT"
+  ],
+  "versionDefines": [],
+  "autoReferenced": true
+}

@@ -34,3 +34,6 @@ This is a new maintenance line. See README and Documentation~ for upstream basel
 - Compact artboard and layer settings into single-line rows, with hierarchy guides, component icons and original/reverse/renamed-first artboard sorting.
 - Collapse omitted subtrees when opening settings and immediately after marking them omitted; allow manual expansion afterward.
 - Add portable reference-safety, reference-name, merge-eligibility, sorting and shadow regression tests.
+
+- Bundle optional OSA export adapters and PrimeTween button feedback; preserve trigger asset GUIDs and prefer existing project components. Detect assembly definitions and compile optional backends with support symbols without mandatory third-party dependencies.
+- Scroll overflowing layer names as a clipped single-line marquee, with cached widths and visible-row repaint throttling.

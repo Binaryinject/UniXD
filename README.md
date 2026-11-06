@@ -60,6 +60,16 @@ https://github.com/Binaryinject/UniXD.git
 
 对照基线及统计口径见 [原版差异说明](Documentation~/UpstreamComparison.md)。
 
+## 可选 OSA 与按钮反馈集成
+
+包内提供 `OsaScrollViewExportTrigger` 和 `ButtonFeedbackExportTrigger`，加入 Import Settings 的 Triggers 列表即可使用。现有项目迁入时保留原脚本 GUID 和配置。
+
+- 安装 OSA 的 `OSA.Core` 后，通过 `UNIXD_OSA_SUPPORT` 编译独立 OSA 后端及通用 `BIEngine.UniXD.Osa.UniXDListAdapter` / `UniXDGridAdapter`。普通 ScrollView 不经过 OSA；选择 OSA 而缺少依赖时，导出明确报错，不修改为其他列表。
+- 安装 PrimeTween 后，通过 `UNIXD_PRIMETWEEN_SUPPORT` 编译包内 `BIEngine.UniXD.ButtonFeedback`。UPM 使用 `com.kyrylokuzyk.primetween` 版本检测；编辑器也检测程序集定义，兼容当前 Asset Store 安装方式。未安装时反馈 Trigger 不添加组件。
+- 编辑器依据 `OSA.Core` / `PrimeTween.Runtime` 的程序集定义维护当前构建目标的支持宏，切换目标时重新检测。两个第三方库均需自行安装，不是 UniXD 强制依赖，也不随本仓库分发。
+- 当前项目的全局 `UIListAdapter` / `UIGridAdapter`（提供 `ConfigureForExport`）及 `BIEngine.UIPanelStack.ButtonFeedback` 优先复用；缺少时才使用包内组件。既有反馈组件的参数保持不变，也不会在同一按钮重复添加包内和项目两种反馈。
+- 通用 OSA 适配器提供 `Action` 回调，不要求 R3；列表用 `updateViewsHolder`、`createViewsHolder`、`collectItemsSizes`，网格用 `updateCellViewsHolder`。运行时数据量仍由业务通过 OSA API 设置。
+
 ## 第一次使用
 
 ### 1. 创建导出设置
@@ -111,7 +121,7 @@ Texture Preset 用于项目自己的纹理导入、压缩和平台设置。SVG �
 
 ### 4. 审核图层并导出
 
-画板与合图窗口使用紧凑单行列表。画板可按原始顺序、反向顺序或已改名优先排序；编辑名称时暂缓重排。合图窗口通过缩进、层级线和折叠箭头显示父子关系，并以 TMP、位图、SVG、滚动容器和分组图标区分类型；悬停查看原始路径、最终导出名及组件预览。保存设置后回到画板列表，点击“导出所选”。
+画板与合图窗口使用紧凑单行列表。画板可按原始顺序、反向顺序或已改名优先排序；编辑名称时暂缓重排。合图窗口通过缩进、层级线和折叠箭头显示父子关系，并以 TMP、位图、SVG、滚动容器和分组图标区分类型；超长名称保持单行并循环滚动，视口外及无需滚动的名称不触发动画重绘；悬停查看原始路径、最终导出名及组件预览。保存设置后回到画板列表，点击“导出所选”。
 
 建议先导出一个小画板，检查字体、交互节点、阴影和缩放，再批量处理。修改 XD 后可以重新执行相同流程；没有变化的资源会尽量复用。
 

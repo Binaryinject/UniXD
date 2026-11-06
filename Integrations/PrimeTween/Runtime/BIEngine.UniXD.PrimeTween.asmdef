@@ -1,0 +1,19 @@
+{
+  "name": "BIEngine.UniXD.PrimeTween",
+  "references": [
+    "PrimeTween.Runtime",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [],
+  "defineConstraints": [
+    "UNIXD_PRIMETWEEN_SUPPORT"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.kyrylokuzyk.primetween",
+      "expression": "",
+      "define": "UNIXD_PRIMETWEEN_SUPPORT"
+    }
+  ],
+  "autoReferenced": true
+}
