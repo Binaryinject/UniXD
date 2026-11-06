@@ -195,7 +195,7 @@ namespace BIEngine.UniXD.Xd
                 m_Views.Add(view);
             }
             XdArtboardExportNameHistory.Load(_file).TryGetValue(_board, out var boardName);
-            m_BoardLabel = "画板：" + _boardOriginal + " → " + Preview(boardName ?? _boardOriginal, null);
+            m_BoardLabel = "画板：" + _boardOriginal + " → " + (_board == "pasteboard" ? "pasteboard" : Preview(boardName ?? _boardOriginal, null));
             m_Summary = $"已选择 {selectedCount} 个合图分组 · {omittedCount} 项不导出 · 自动保存";
             m_DisplayDirty = false;
             m_VisibleDirty = true;

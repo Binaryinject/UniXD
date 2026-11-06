@@ -26,7 +26,9 @@ namespace BIEngine.UniXD.Xd
             {
                 XdFilePath = xdFilePath;
                 SelectedArtboardPaths = selectedArtboardPaths;
-                ExportNames = (exportNames ?? XdArtboardExportNameHistory.Load(xdFilePath)).ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+                var names = (exportNames ?? XdArtboardExportNameHistory.Load(xdFilePath)).ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+                names.Remove("pasteboard");
+                ExportNames = names;
             }
         }
 
@@ -34,6 +36,7 @@ namespace BIEngine.UniXD.Xd
         {
             public string DisplayName { get; }
             public string ManifestPath { get; }
+            public bool isSystemPasteboard => ManifestPath == "pasteboard";
             public bool IsMarkedForExport { get; }
             public bool IsExpandArtboard { get; }
             public IReadOnlyList<string> ExpandedChildNames { get; }
@@ -43,7 +46,7 @@ namespace BIEngine.UniXD.Xd
                 DisplayName = displayName;
                 ManifestPath = manifestPath;
                 IsMarkedForExport = isMarkedForExport;
-                IsExpandArtboard = isExpandArtboard;
+                IsExpandArtboard = !isSystemPasteboard && isExpandArtboard;
                 ExpandedChildNames = Array.AsReadOnly((expandedChildNames ?? Array.Empty<string>()).ToArray());
             }
         }
@@ -126,6 +129,7 @@ namespace BIEngine.UniXD.Xd
 
         public static string GetExportName(XdArtboardImportOption option, string configuredName, XdImportSettings settings = null)
         {
+            if (option.isSystemPasteboard) return "pasteboard";
             if (!string.IsNullOrWhiteSpace(configuredName)) return XdExportRules.NormalizeName(configuredName.Trim(), settings: settings);
             return XdExportRules.NormalizeName(option.IsExpandArtboard ? EditorUtil.ValidFileName(option.DisplayName.Split('@')[0]) : option.DisplayName.ToSafeString(), settings: settings);
         }
@@ -138,6 +142,8 @@ namespace BIEngine.UniXD.Xd
                 string configuredName = null;
                 exportNames?.TryGetValue(option.ManifestPath, out configuredName);
                 var name = GetExportName(option, configuredName, settings);
+                if (!option.isSystemPasteboard && string.Equals(name, "pasteboard", StringComparison.OrdinalIgnoreCase))
+                    return "导出名称 pasteboard 为 XD 系统粘贴板保留。";
                 var names = option.IsExpandArtboard ? option.ExpandedChildNames.Select(x => (name + x).ToSafeString()) : new[] { name };
                 foreach (var outputName in names)
                 {
@@ -273,7 +279,8 @@ namespace BIEngine.UniXD.Xd
                     string configuredName = null;
                     exportNames?.TryGetValue(artwork.Manifest.Path, out configuredName);
                     configuredName = string.IsNullOrWhiteSpace(configuredName) ? null : configuredName.Trim();
-                    if (!artwork.HasParameter("expand"))
+                    if (artwork.Manifest.Path == "pasteboard") configuredName = "pasteboard";
+                    if (artwork.Manifest.Path == "pasteboard" || !artwork.HasParameter("expand"))
                     {
                         expandTargets.Add(configuredName == null ? artwork : new XdArtboard(configuredName, artwork.Manifest, artwork.Artboard, artwork.Resources, artwork.Hash));
                         continue;
@@ -311,7 +318,7 @@ namespace BIEngine.UniXD.Xd
                     using (var _ = logger.SetCategory(artwork.Name))
                     {
                         LayerNameOverrides = XdFlattenHistory.LoadNames(xdFilePath, artwork.Manifest.Path);
-                        var name = XdExportRules.NormalizeName(artwork.Name.ToSafeString());
+                        var name = artwork.Manifest.Path == "pasteboard" ? "pasteboard" : XdExportRules.NormalizeName(artwork.Name.ToSafeString());
                         var translatedNameError = GetFileNameError(name);
                         if (translatedNameError != null) throw new ArgumentException(translatedNameError);
                         if (loaders.Any(x => string.Equals(x.LayoutInfo.Name, name, StringComparison.OrdinalIgnoreCase)))

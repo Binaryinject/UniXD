@@ -75,7 +75,7 @@ namespace BIEngine.UniXD.Xd
             _items = options.Select(x => new ArtboardSelectionState(x, selectedPaths.Contains(x.ManifestPath))).ToList();
             _exportNames = XdArtboardExportNameHistory.Load(xdFilePath);
             foreach (var item in _items)
-                if (_exportNames.TryGetValue(item.Option.ManifestPath, out var name)) item.ExportName = name;
+                if (!item.Option.isSystemPasteboard && _exportNames.TryGetValue(item.Option.ManifestPath, out var name)) item.ExportName = name;
         }
 
         private void OnGUI()
@@ -156,7 +156,7 @@ namespace BIEngine.UniXD.Xd
                             foreach (var item in _items)
                             {
                                 item.Selected = selected.Contains(item.Option.ManifestPath);
-                                item.ExportName = _exportNames.TryGetValue(item.Option.ManifestPath, out var name) ? name : "";
+                                item.ExportName = !item.Option.isSystemPasteboard && _exportNames.TryGetValue(item.Option.ManifestPath, out var name) ? name : "";
                             }
                         }
                         catch (Exception error) { EditorUtility.DisplayDialog("读取失败", error.Message, "确定"); }
@@ -257,16 +257,25 @@ namespace BIEngine.UniXD.Xd
             GUI.Label(nameRect,new GUIContent(item.Option.DisplayName,item.Option.DisplayName+"\n"+item.Option.ManifestPath),EditorStyles.label);
             if(Event.current.type==EventType.MouseDown&&Event.current.button==0&&nameRect.Contains(Event.current.mousePosition)){ApplyArtboardSelection(item,!item.Selected,Event.current.shift);GUI.FocusControl(null);Event.current.Use();}
             var input=new Rect(row.x+sourceWidth,y,Mathf.Max(80,row.width-sourceWidth-260),18);
-            var control="ExportName/"+item.Option.ManifestPath;GUI.SetNextControlName(control);EditorGUI.BeginChangeCheck();var value=EditorGUI.TextField(input,item.ExportName);if(EditorGUI.EndChangeCheck())UpdateExportName(item,value);
+            var control="ExportName/"+item.Option.ManifestPath;
+            if (item.Option.isSystemPasteboard) {
+                GUI.Label(input, new GUIContent("pasteboard", "XD 系统公共图库，导出名称固定"), EditorStyles.textField);
+                using (new EditorGUI.DisabledScope(true))
+                    GUI.Button(new Rect(input.xMax+4,y,20,18),new GUIContent("×","系统名称不可修改"),EditorStyles.miniButton);
+            }
+            else {
+            GUI.SetNextControlName(control);EditorGUI.BeginChangeCheck();var value=EditorGUI.TextField(input,item.ExportName);if(EditorGUI.EndChangeCheck())UpdateExportName(item,value);
             if(string.IsNullOrEmpty(item.ExportName)&&GUI.GetNameOfFocusedControl()!=control)GUI.Label(new Rect(input.x+4,y,input.width-8,18),new GUIContent(XdImporter.GetExportName(item.Option,null,_settings),"导出名称；留空沿用原名"),EditorStyles.miniLabel);
             if(GUI.Button(new Rect(input.xMax+4,y,20,18),new GUIContent("×","还原导出名称"),EditorStyles.miniButton)){UpdateExportName(item,"");GUI.FocusControl(null);}
-            var status=(item.Option.IsMarkedForExport?"已标记":"")+(item.Option.IsExpandArtboard?" · 展开子项":"");
+            }
+            var status=item.Option.isSystemPasteboard ? "系统图库 · 名称固定" : (item.Option.IsMarkedForExport?"已标记":"")+(item.Option.IsExpandArtboard?" · 展开子项":"");
             GUI.Label(new Rect(input.xMax+30,y,130,18),new GUIContent(status,status),EditorStyles.miniLabel);
             if(GUI.Button(new Rect(row.xMax-92,y,84,18),"合图设置…",EditorStyles.miniButton)){var path=_xdFilePath;var board=item.Option;var settings=_settings;EditorApplication.delayCall+=()=>XdFlattenWindow.Open(path,board,settings);}
         }
 
         private void UpdateExportName(ArtboardSelectionState item, string name)
         {
+            if (item.Option.isSystemPasteboard) return;
             item.ExportName = name;
             if (string.IsNullOrWhiteSpace(name)) _exportNames.Remove(item.Option.ManifestPath);
             else _exportNames[item.Option.ManifestPath] = name.Trim();

@@ -324,4 +324,6 @@ UniXD 使用 MIT 许可证，见 [LICENSE](LICENSE)。
 
 感谢 [kyubuns](https://github.com/kyubuns) 的 AkyuiUnity、Akyui 和 Auto9Slicer。原始许可证保留在各模块内；内置 Utf8Json 保留其许可证、名称和来源。详见 [第三方声明](THIRD-PARTY-NOTICES.md)。
 
-粘贴板（`pasteboard`）支持导出散落的根图层，导出尺寸按可见内容范围计算，不要求 XD 的画板尺寸记录。SharedSpriteResourceTrigger 的默认公共图库名单包含 `Resource` 和 `pasteboard`；若覆盖粘贴板导出名称，需将该最终名称加入 `globalPrimaryLibraryNames`。已有配置不会被新默认值覆盖，请按需补入名单。
+粘贴板（`pasteboard`）支持导出散落的根图层，导出尺寸按可见内容范围计算，不要求 XD 的画板尺寸记录。`pasteboard` 是 SharedSpriteResourceTrigger 内置的系统公共图库，不存入、不显示在 `globalPrimaryLibraryNames`，清空自定义名单也不会关闭它的公共图库优先级。该名单仅用于人工公共图库，默认保留 `Resource`。
+
+系统粘贴板的导出名称固定为 `pasteboard`：画板窗口不可修改该名称，旧名称覆盖和接口传入的改名也会忽略；其他画板不能占用此保留名称。

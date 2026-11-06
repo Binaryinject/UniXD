@@ -10,6 +10,38 @@ using NUnit.Framework;
 using UnityEngine;
 namespace BIEngine.UniXD.Tests {
     public sealed class PasteboardTests {
+        [Test] public void SystemExportNameCannotBeOverriddenOrUsedByAnotherBoard() {
+            var option = new XdImporter.XdArtboardImportOption("pasteboard", "pasteboard", false, true, new[] { "child" });
+            Assert.That(option.IsExpandArtboard, Is.False);
+            Assert.That(XdImporter.GetExportName(option, "Renamed"), Is.EqualTo("pasteboard"));
+            var supplied = new Dictionary<string,string> { { "pasteboard", "Renamed" } };
+            var request = new XdImporter.XdImportRequest("NamingFixture.xd", new[] { "pasteboard" }, supplied);
+            Assert.That(request.ExportNames.ContainsKey("pasteboard"), Is.False);
+            Assert.That(supplied["pasteboard"], Is.EqualTo("Renamed"));
+            var other = new XdImporter.XdArtboardImportOption("Other", "artboard-other", false, false);
+            Assert.That(XdImporter.GetExportNameError(new[] { other }, new Dictionary<string,string> { { "artboard-other", "pasteboard" } }), Is.Not.Null);
+        }
+        [Test] public void SystemLibraryIsAlwaysPrimaryAndNeverStoredInEditableNames() {
+            var trigger = ScriptableObject.CreateInstance<BIEngine.UniXD.CommonTrigger.SharedSpriteResourceTrigger>();
+            try {
+                var fields = new UnityEditor.SerializedObject(trigger);
+                var names = fields.FindProperty("globalPrimaryLibraryNames");
+                Assert.That(Enumerable.Range(0, names.arraySize).Select(i => names.GetArrayElementAtIndex(i).stringValue), Does.Not.Contain("pasteboard"));
+                names.ClearArray(); fields.ApplyModifiedPropertiesWithoutUndo();
+                var method = trigger.GetType().GetMethod("IsPrimaryPanel", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                Assert.That(method.Invoke(trigger, new object[] { "pasteboard" }), Is.True);
+                Assert.That(method.Invoke(trigger, new object[] { "PASTEBOARD" }), Is.True);
+                Assert.That(method.Invoke(trigger, new object[] { "OtherLibrary" }), Is.False);
+                names = new UnityEditor.SerializedObject(trigger).FindProperty("globalPrimaryLibraryNames");
+                names.arraySize = 2; names.GetArrayElementAtIndex(0).stringValue = "OtherLibrary"; names.GetArrayElementAtIndex(1).stringValue = "pasteboard";
+                names.serializedObject.ApplyModifiedPropertiesWithoutUndo();
+                trigger.GetType().GetMethod("OnValidate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(trigger, null);
+                names = new UnityEditor.SerializedObject(trigger).FindProperty("globalPrimaryLibraryNames");
+                Assert.That(names.arraySize, Is.EqualTo(1)); Assert.That(names.GetArrayElementAtIndex(0).stringValue, Is.EqualTo("OtherLibrary"));
+                Assert.That(method.Invoke(trigger, new object[] { "pasteboard" }), Is.True);
+                Assert.That(method.Invoke(trigger, new object[] { "OtherLibrary" }), Is.True);
+            } finally { UnityEngine.Object.DestroyImmediate(trigger); }
+        }
         private string m_Path;
         private static XdObjectJson Shape(string id, float x, float y, float w, float h) => new XdObjectJson {
             Id = id, Name = id, Type = "shape", Transform = new XdTransformJson { A = 1, D = 1, Tx = x, Ty = y },
@@ -37,6 +69,7 @@ namespace BIEngine.UniXD.Tests {
             using var loader = Load(file, board);
             var nodes = loader.LayoutInfo.Elements.OfType<ObjectElement>().ToArray();
             Assert.That(nodes.Single(n => n.Eid == 0).Size, Is.EqualTo(new Vector2(100,80)));
+            Assert.That(nodes.Single(n => n.Eid == 0).Name, Is.EqualTo("pasteboard"));
             Assert.That(nodes.Single(n => n.Eid == BIEngine.UniXD.Loader.FastHash.CalculateHash("first-shape")).Position, Is.EqualTo(new Vector2(-45,-30)));
             Assert.That(nodes.Length, Is.EqualTo(3));
         }

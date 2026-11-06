@@ -22,7 +22,7 @@ namespace BIEngine.UniXD.CommonTrigger
     [CreateAssetMenu(menuName = "UniXD/Triggers/SharedSpriteResource", fileName = nameof(SharedSpriteResourceTrigger))]
     public sealed class SharedSpriteResourceTrigger : ImportTrigger
     {
-        [SerializeField] private string[] globalPrimaryLibraryNames = { "Resource", "pasteboard" };
+        [SerializeField] private string[] globalPrimaryLibraryNames = { "Resource" };
         [SerializeField, Tooltip("留空时使用资源目录模板中的 {name} = Shared。")]
         private string m_SharedDirectory = "";
         [SerializeField, Min(0)] private int m_MaxSpriteArea = SpriteAtlasAreaFilter.defaultMaxSpriteArea;
@@ -117,7 +117,7 @@ namespace BIEngine.UniXD.CommonTrigger
                 || shared.Contains("..") || root.Contains(".."))
                 throw new InvalidOperationException("Shared 目录必须位于配置的 Assets 资源根目录内。");
             m_Settings = settings;
-            var policy = "AtlasState-v2:" + string.Join("|", globalPrimaryLibraryNames ?? Array.Empty<string>()) + ":" + m_MaxSpriteArea + ":" + m_StandaloneCompression + ":" + m_CompressionQuality + ":" + ImportFingerprintSession.ObjectFingerprint(m_AtlasPreset) + ":" + EditorUserBuildSettings.activeBuildTarget;
+            var policy = "AtlasState-v3:SystemPasteboard:" + string.Join("|", globalPrimaryLibraryNames ?? Array.Empty<string>()) + ":" + m_MaxSpriteArea + ":" + m_StandaloneCompression + ":" + m_CompressionQuality + ":" + ImportFingerprintSession.ObjectFingerprint(m_AtlasPreset) + ":" + EditorUserBuildSettings.activeBuildTarget;
             if (m_Index != null && m_Policy != policy)
             {
                 foreach (var image in m_Index.images.Values) m_Index.changedKeys.Add(image.key);
@@ -148,7 +148,15 @@ namespace BIEngine.UniXD.CommonTrigger
             m_Ready = true;
         }
 
-        private bool IsPrimaryPanel(string panel) => (globalPrimaryLibraryNames ?? Array.Empty<string>()).Contains(panel, StringComparer.OrdinalIgnoreCase);
+        private static bool IsSystemLibrary(string panel) => string.Equals(panel, "pasteboard", StringComparison.OrdinalIgnoreCase);
+        private bool IsPrimaryPanel(string panel) => IsSystemLibrary(panel) ||
+            (globalPrimaryLibraryNames ?? Array.Empty<string>()).Contains(panel, StringComparer.OrdinalIgnoreCase);
+
+        private void OnValidate() {
+            // Reserved XD libraries are built in, not editable entries in the user's library list.
+            if (globalPrimaryLibraryNames != null && globalPrimaryLibraryNames.Any(IsSystemLibrary))
+                globalPrimaryLibraryNames = globalPrimaryLibraryNames.Where(name => !IsSystemLibrary(name)).ToArray();
+        }
 
         private void DiscoverSharedFiles()
         {

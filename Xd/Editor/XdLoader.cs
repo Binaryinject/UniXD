@@ -47,6 +47,7 @@ namespace BIEngine.UniXD.Xd
         public XdLoader(XdFile xdFile, XdArtboard xdArtboard, string name, Dictionary<string, string> userData, XdObjectParser[] objectParsers, XdGroupParser[] groupParsers,
             XdImportTrigger[] triggers, IImportProgress progress = null)
         {
+            if (xdArtboard.Manifest.Path == "pasteboard") name = "pasteboard";
             _xdFile = xdFile;
             _objectParsers = objectParsers.Concat(DefaultObjectParsers).ToArray();
             _groupParsers = groupParsers.Concat(DefaultGroupParsers).ToArray();
@@ -56,7 +57,8 @@ namespace BIEngine.UniXD.Xd
             try
             {
                 XdExportRules.ActiveTriggers = triggers;
-                (LayoutInfo, AssetsInfo) = Create(xdArtboard, _assetHolder, XdExportRules.NormalizeName(name), userData, progress);
+                (LayoutInfo, AssetsInfo) = Create(xdArtboard, _assetHolder,
+                    xdArtboard.Manifest.Path == "pasteboard" ? "pasteboard" : XdExportRules.NormalizeName(name), userData, progress);
             }
             finally { XdExportRules.ActiveTriggers = previousTriggers; }
         }
