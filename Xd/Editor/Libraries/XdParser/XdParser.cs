@@ -41,6 +41,15 @@ namespace BIEngine.UniXD.Xd.Parsing
                     var artworkJsonString = jsonTextCache[artworkJsonFilePath];
                     if (!jsonObjectCache.ContainsKey(artworkJsonFilePath)) jsonObjectCache.Add(artworkJsonFilePath, JsonSerializer.Deserialize<XdArtboardJson>(artworkJsonString));
                     var artworkJson = (XdArtboardJson) jsonObjectCache[artworkJsonFilePath];
+                    // Pasteboard stores loose layers directly, without an artboard wrapper or rectangle.
+                    // Normalize once so selection, naming, omission and expansion share the same tree.
+                    if (xdManifestArtwork.Path == "pasteboard")
+                        artworkJson.Children = new[] { new XdArtboardChildJson {
+                            Type = "artboard", Id = "pasteboard",
+                            Artboard = new XdArtboardChildArtboardJson {
+                                Children = JsonSerializer.Deserialize<XdObjectGroupJson>(artworkJsonString).Children ?? Array.Empty<XdObjectJson>()
+                            }
+                        } };
     
                     var resourceJsonFilePath = artworkJson.Resources.Href.TrimStart('/');
                     if (!jsonTextCache.ContainsKey(resourceJsonFilePath)) jsonTextCache.Add(resourceJsonFilePath, _zipFile.ReadString(resourceJsonFilePath));

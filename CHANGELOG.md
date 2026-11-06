@@ -37,3 +37,5 @@ This is a new maintenance line. See README and Documentation~ for upstream basel
 
 - Bundle optional OSA export adapters and PrimeTween button feedback; preserve trigger asset GUIDs and prefer existing project components. Detect assembly definitions and compile optional backends with support symbols without mandatory third-party dependencies.
 - Scroll overflowing layer names as a clipped single-line marquee, with cached widths and visible-row repaint throttling.
+
+- Export XD pasteboard loose layers without requiring artboard metadata; derive bounds from visible content and preserve root IDs. Include pasteboard in the default primary sprite library names.

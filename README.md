@@ -323,3 +323,5 @@ XdImporter.Import(settings, xdPath, selectedManifestPaths);
 UniXD 使用 MIT 许可证，见 [LICENSE](LICENSE)。
 
 感谢 [kyubuns](https://github.com/kyubuns) 的 AkyuiUnity、Akyui 和 Auto9Slicer。原始许可证保留在各模块内；内置 Utf8Json 保留其许可证、名称和来源。详见 [第三方声明](THIRD-PARTY-NOTICES.md)。
+
+粘贴板（`pasteboard`）支持导出散落的根图层，导出尺寸按可见内容范围计算，不要求 XD 的画板尺寸记录。SharedSpriteResourceTrigger 的默认公共图库名单包含 `Resource` 和 `pasteboard`；若覆盖粘贴板导出名称，需将该最终名称加入 `globalPrimaryLibraryNames`。已有配置不会被新默认值覆盖，请按需补入名单。

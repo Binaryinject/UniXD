@@ -22,7 +22,7 @@ namespace BIEngine.UniXD.CommonTrigger
     [CreateAssetMenu(menuName = "UniXD/Triggers/SharedSpriteResource", fileName = nameof(SharedSpriteResourceTrigger))]
     public sealed class SharedSpriteResourceTrigger : ImportTrigger
     {
-        [SerializeField] private string[] globalPrimaryLibraryNames = { "Resource" };
+        [SerializeField] private string[] globalPrimaryLibraryNames = { "Resource", "pasteboard" };
         [SerializeField, Tooltip("留空时使用资源目录模板中的 {name} = Shared。")]
         private string m_SharedDirectory = "";
         [SerializeField, Min(0)] private int m_MaxSpriteArea = SpriteAtlasAreaFilter.defaultMaxSpriteArea;

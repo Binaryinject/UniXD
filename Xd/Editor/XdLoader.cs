@@ -136,7 +136,11 @@ namespace BIEngine.UniXD.Xd
 
                 CreateRefObjectMap(resources.Resources);
 
-                var xdResourcesArtboardsJson = resources.Artboards[xdArtboard.Manifest.Path.Replace("artboard-", "")];
+                var pasteboard = xdArtboard.Manifest.Path == "pasteboard";
+                XdResourcesArtboardsJson xdResourcesArtboardsJson;
+                if (pasteboard) xdResourcesArtboardsJson = new XdResourcesArtboardsJson();
+                else if (resources.Artboards == null || !resources.Artboards.TryGetValue(xdArtboard.Manifest.Path.Replace("artboard-", ""), out xdResourcesArtboardsJson))
+                    throw new ImportException($"XD 画板“{xdArtboard.Name}”缺少尺寸记录：{xdArtboard.Manifest.Path}");
                 var rootObb = new Obb { Size = new Vector2(xdResourcesArtboardsJson.Width, xdResourcesArtboardsJson.Height) };
 
                 var rootArtboard = xdArtboard.Artboard.Children[0];
@@ -149,6 +153,12 @@ namespace BIEngine.UniXD.Xd
                 {
                     XdImporter.LayerNameOverrides = XdExportRules.BuildLayerNames(convertedXdObjectJsons, XdImporter.Settings, previousNames);
                     var childrenObbs = CalcPosition(convertedXdObjectJsons, rootObb, new XdObjectJson[] { });
+                    if (pasteboard) {
+                        var bounds = Obb.MinMaxRect(childrenObbs.Where((obb, index) => convertedXdObjectJsons[index].Visible != false).ToArray());
+                        xdResourcesArtboardsJson.X = bounds.xMin;
+                        xdResourcesArtboardsJson.Y = bounds.yMin;
+                        rootObb.Size = new Vector2(Mathf.Max(1, bounds.width), Mathf.Max(1, bounds.height));
+                    }
                     foreach (var childObb in childrenObbs) childObb.LocalLeftTopPosition -= new Vector2(xdResourcesArtboardsJson.X, xdResourcesArtboardsJson.Y);
                     children = Render(convertedXdObjectJsons, rootObb, new XdObjectJson[] { });
                 }
