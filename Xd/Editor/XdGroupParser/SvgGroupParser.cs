@@ -17,7 +17,7 @@ namespace BIEngine.UniXD.Xd
 
         public bool Is(XdObjectJson xdObject, XdObjectJson[] parents)
         {
-            if (!XdVectorExport.CanFlatten(xdObject, XdImporter.VectorLayerIds)) return false;
+            if (!HasMergeContent(xdObject) || !XdVectorExport.CanFlatten(xdObject, XdImporter.VectorLayerIds)) return false;
             if (_configuredOnly)
             {
                 if (xdObject.Type != "group") return false;
@@ -38,6 +38,13 @@ namespace BIEngine.UniXD.Xd
             }
 
             return isLinkedElement && IsShapeOnly(xdObject);
+        }
+
+        public static bool HasMergeContent(XdObjectJson node) {
+            bool Painted(XdObjectJson child) => child.Visible != false && (child.Group != null
+                ? (child.Group.Children ?? System.Array.Empty<XdObjectJson>()).Any(Painted)
+                : child.Type == "shape" && child.Shape != null && SvgUtil.Types.Contains(child.Shape.Type) && !SvgUtil.IsAlphaOnly(child));
+            return node.Visible != false && node.Group != null && (node.Group.Children ?? System.Array.Empty<XdObjectJson>()).Any(Painted);
         }
 
         public static bool CanFlatten(XdObjectJson node)
@@ -77,13 +84,13 @@ namespace BIEngine.UniXD.Xd
                 return true;
             }
             if (node.Type != "shape" || node.Shape == null || !SvgUtil.Types.Contains(node.Shape.Type)) return false;
-            count = 1;
+            count = SvgUtil.IsAlphaOnly(node) ? 0 : 1;
             return true;
         }
 
         public Rect CalcSize(XdObjectJson xdObject, Rect rect)
         {
-            var svg = SvgUtil.CreateSvg(xdObject, null, true, _configuredOnly);
+            var svg = SvgUtil.CreateSvg(xdObject, null, true, _configuredOnly || XdInnerShadowRenderer.HasShadows(xdObject), false);
             var bounds = SvgUtil.CalcBounds(svg);
             return bounds;
         }
@@ -95,7 +102,9 @@ namespace BIEngine.UniXD.Xd
 
             var obb = obbGetter.Get(xdObject);
             var size = obb.Size;
-            var svg = SvgUtil.CreateSvg(xdObject, obb, false, _configuredOnly);
+            var hasInner = XdInnerShadowRenderer.HasShadows(xdObject);
+            var svg = SvgUtil.CreateSvg(xdObject, obb, false, _configuredOnly || hasInner);
+            var alphaSvg = hasInner ? SvgUtil.CreateSvg(xdObject, obb, false, true, false) : null;
 
             if (assetHolder.IsVector(xdObject))
             {
@@ -106,7 +115,8 @@ namespace BIEngine.UniXD.Xd
             xdObject.Group.Children = new XdObjectJson[] { };
 
             var spriteUid = $"{xdObject.GetSimpleName()}_{xdObject.Id.Substring(0, 8)}.png";
-            var svgHash = FastHash.CalculateHash(svg);
+            var description = hasInner ? "InnerGroup-v1\n" + svg + "\nAlpha\n" + alphaSvg : "PreserveViewport\n" + svg;
+            var svgHash = FastHash.CalculateHash(hasInner ? description : svg);
 
             var cachedSvg = assetHolder.GetCachedSvg(svgHash);
             if (cachedSvg != null)
@@ -119,7 +129,7 @@ namespace BIEngine.UniXD.Xd
                 var border = xdObject.HasParameter("NoSlice") ? new BIEngine.UniXD.Border(0, 0, 0, 0) : null;
                 assets.Add(new SpriteAsset(spriteUid, svgHash, size, null, border));
                 var xdImportSettings = XdImporter.Settings;
-                assetHolder.Save(spriteUid, () => SvgToPng.Convert(svg, size, ViewportOptions.PreserveViewport, xdImportSettings), "PreserveViewport\n" + svg);
+                assetHolder.Save(spriteUid, () => XdInnerShadowRenderer.RenderGroup(svg, alphaSvg, size, xdImportSettings), description);
                 assetHolder.SaveCacheSvg(spriteUid, svgHash);
             }
             components.Add(new ImageComponent(

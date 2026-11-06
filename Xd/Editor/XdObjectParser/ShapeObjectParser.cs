@@ -106,6 +106,17 @@ namespace BIEngine.UniXD.Xd
             var border = xdObject.HasParameter("NoSlice") ? new Border(0, 0, 0, 0) : null;
             var isPlaceholder = xdObject.HasParameter("placeholder");
 
+            if (!isPlaceholder && XdInnerShadowRenderer.HasOwnShadow(xdObject)) {
+                var svg = SvgUtil.CreateSvg(xdObject, null, false, true, false);
+                var description = "InnerShadow-v2\n" + svg + "\n" + Utf8Json.JsonSerializer.ToJsonString(xdObject.Style.Filters.Where(f => f.Visible != false && (f.Type == "uxdesign#innerShadow" || f.Type == "innerShadow")).ToArray());
+                var hash = FastHash.CalculateHash(description);
+                var file = $"{xdObject.GetSimpleName()}_{xdObject.Id.Substring(0, 8)}.png";
+                var settings = XdImporter.Settings;
+                assetHolder.Save(file, () => XdInnerShadowRenderer.Render(svg, obb.Size, xdObject, settings), description);
+                return (new ImageComponent(file, new Color(1,1,1,xdObject.Style?.Opacity ?? 1f), Vector2Int.one, hash),
+                    new IAsset[] { new SpriteAsset(file, hash, obb.Size, null, new Border(0,0,0,0)) });
+            }
+
             if (!string.IsNullOrWhiteSpace(ux?.Uid))
             {
                 string spriteUid = null;

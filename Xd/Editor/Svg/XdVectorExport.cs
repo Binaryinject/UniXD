@@ -14,7 +14,7 @@ namespace BIEngine.UniXD.Xd
         public static bool IsEligible(XdObjectJson node, IReadOnlyDictionary<string, XdObjectJson> symbols = null)
         {
             node = XdExportRules.ResolvePreviewNode(node, symbols);
-            if (node.Type == "shape") return SvgUtil.Types.Contains(node.Shape?.Type) &&
+            if (node.Type == "shape") return !XdInnerShadowRenderer.HasOwnShadow(node) && SvgUtil.Types.Contains(node.Shape?.Type) &&
                 node.Style?.Fill?.Pattern == null && node.Style?.Fill?.Type != "pattern";
             return node.Group?.Children?.Length > 0 && node.Group.Children.All(x => x.Visible == false || IsEligible(x));
         }

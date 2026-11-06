@@ -44,7 +44,7 @@ namespace BIEngine.UniXD.Xd
                 ManifestPath = manifestPath;
                 IsMarkedForExport = isMarkedForExport;
                 IsExpandArtboard = isExpandArtboard;
-                ExpandedChildNames = expandedChildNames ?? Array.Empty<string>();
+                ExpandedChildNames = Array.AsReadOnly((expandedChildNames ?? Array.Empty<string>()).ToArray());
             }
         }
 
@@ -54,6 +54,7 @@ namespace BIEngine.UniXD.Xd
         internal static HashSet<string> FlattenGroupIds { get; private set; } = new HashSet<string>();
         internal static HashSet<string> FlattenExcludedIds { get; private set; } = new HashSet<string>();
         internal static HashSet<string> OmittedLayerIds { get; private set; } = new HashSet<string>();
+        internal static HashSet<string> MergedShadowLayerIds { get; private set; } = new HashSet<string>();
         internal static HashSet<string> VectorLayerIds { get; private set; } = new HashSet<string>();
         internal static Dictionary<string, XdScrollViewMode> ScrollViewModes { get; private set; } = new Dictionary<string, XdScrollViewMode>();
         internal static Dictionary<string, string> LayerNameOverrides { get; set; } = new Dictionary<string, string>();
@@ -71,10 +72,22 @@ namespace BIEngine.UniXD.Xd
 
         public static XdArtboardImportOption[] GetImportOptions(string xdFilePath, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var key = Path.GetFullPath(xdFilePath);
+            var fingerprint = ImportContentCache.GetFileHash(xdFilePath);
+            if (m_OptionCache.TryGetValue(key, out var cached) && cached.fingerprint == fingerprint)
+                return cached.options.ToArray();
             using (var progress = new ImportProgressBar("读取 XD 画板", cancellationToken))
             using (var file = new XdFile(xdFilePath, progress.Update))
-                return BuildImportOptions(file.Artworks).ToArray();
+            {
+                var options = BuildImportOptions(file.Artworks).ToArray();
+                if (m_OptionCache.Count >= 8) m_OptionCache.Clear();
+                m_OptionCache[key] = (fingerprint, options);
+                return options.ToArray();
+            }
         }
+
+        private static readonly Dictionary<string, (string fingerprint, XdArtboardImportOption[] options)> m_OptionCache = new(StringComparer.OrdinalIgnoreCase);
 
         public static string[] ResolveSelectedArtboards(IReadOnlyCollection<XdArtboardImportOption> options, IReadOnlyCollection<string> savedArtboardPaths)
         {
@@ -194,6 +207,7 @@ namespace BIEngine.UniXD.Xd
                 foreach (var loader in loaders) loader.Dispose();
                 Logger = null;
                 FlattenGroupIds.Clear();
+                MergedShadowLayerIds.Clear();
                 FlattenExcludedIds.Clear();
                 OmittedLayerIds.Clear();
                 ScrollViewModes.Clear();
@@ -253,6 +267,7 @@ namespace BIEngine.UniXD.Xd
                 {
                     OmittedLayerIds = XdFlattenHistory.LoadOmitted(xdFilePath, artwork.Manifest.Path);
                     VectorLayerIds = XdFlattenHistory.LoadVectors(xdFilePath, artwork.Manifest.Path);
+                    MergedShadowLayerIds = XdFlattenHistory.LoadMergedShadows(xdFilePath, artwork.Manifest.Path);
                     ScrollViewModes = XdFlattenHistory.LoadScrollViewModes(xdFilePath, artwork.Manifest.Path);
                     LayerNameOverrides = XdFlattenHistory.LoadNames(xdFilePath, artwork.Manifest.Path);
                     string configuredName = null;
@@ -317,6 +332,7 @@ namespace BIEngine.UniXD.Xd
                         FlattenExcludedIds = XdFlattenHistory.LoadExcluded(xdFilePath, artwork.Manifest.Path);
                         OmittedLayerIds = XdFlattenHistory.LoadOmitted(xdFilePath, artwork.Manifest.Path);
                         VectorLayerIds = XdFlattenHistory.LoadVectors(xdFilePath, artwork.Manifest.Path);
+                    MergedShadowLayerIds = XdFlattenHistory.LoadMergedShadows(xdFilePath, artwork.Manifest.Path);
                         ScrollViewModes = XdFlattenHistory.LoadScrollViewModes(xdFilePath, artwork.Manifest.Path);
                         loaders.Add(new XdLoader(file, artwork, name, userData, xdObjectParsers, xdGroupParsers, triggers, task));
                         imported++;

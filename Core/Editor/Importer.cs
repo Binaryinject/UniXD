@@ -42,6 +42,7 @@ namespace BIEngine.UniXD.Editor
             {
                 progressBar.SetTotal(loaders.Length);
                 var succeeded = false;
+                var references = new AssetReferenceIndex();
                 try
                 {
                     foreach (var loader in loaders)
@@ -49,7 +50,7 @@ namespace BIEngine.UniXD.Editor
                         using (logger.SetCategory(loader.LayoutInfo.Name))
                         using (var progress = progressBar.TaskStart($"Importing {loader.LayoutInfo.Name}"))
                         {
-                            Import(settings, loader, logger, progress);
+                            Import(settings, loader, logger, progress, references);
                             progress.Update("画板导入完成", 1f);
                         }
                     }
@@ -84,7 +85,7 @@ namespace BIEngine.UniXD.Editor
             throw new Exception($"Cannot load version {loaderVersion} file. (Importer version is {Const.FormatVersion})");
         }
 
-        private static void Import(IImportSettings settings, ILoader layoutLoader, ImportLogger logger, IImportProgress progress)
+        private static void Import(IImportSettings settings, ILoader layoutLoader, ImportLogger logger, IImportProgress progress, AssetReferenceIndex references)
         {
             var stopWatch = Stopwatch.StartNew();
             CheckVersion(layoutLoader);
@@ -127,7 +128,8 @@ namespace BIEngine.UniXD.Editor
                 SaveMetaPrefab(pathGetter, layoutLoader, hash, assets, eidPaths, layoutFingerprint);
 
                 foreach (var trigger in settings.Triggers) trigger.OnPostprocessFile(layoutLoader, pathGetter);
-                DeleteUnusedAssets(prevAssets, assets, logger, pathGetter.AssetOutputDirectoryPath);
+                DeleteUnusedAssets(prevAssets, assets, logger, pathGetter.AssetOutputDirectoryPath,
+                    pathGetter.PrefabSavePath, pathGetter.MetaSavePath, references);
                 foreach (var trigger in settings.Triggers.OfType<ImportTrigger>()) trigger.OnImportCompleted(layoutLoader, pathGetter);
 
                 stopWatch.Stop();
@@ -141,13 +143,21 @@ namespace BIEngine.UniXD.Editor
             }
         }
 
-        private static string[] DeleteUnusedAssets(Object[] prevAssets, Object[] newAssets, ImportLogger logger, string ownedDirectory)
+        private static string[] DeleteUnusedAssets(Object[] prevAssets, Object[] newAssets, ImportLogger logger, string ownedDirectory,
+            string prefabPath, string metaPath, AssetReferenceIndex references)
         {
             var deletedUnusedAssets = new List<string>();
             var newAssetPaths = new HashSet<string>(newAssets
                 .Where(x => x != null)
                 .Select(AssetDatabase.GetAssetPath)
                 .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+            var candidates = prevAssets.Where(x => x != null).Select(AssetDatabase.GetAssetPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path) && !newAssetPaths.Contains(path)
+                    && path.StartsWith(ownedDirectory.TrimEnd('/', '\\') + "/", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (candidates.Length == 0) return deletedUnusedAssets.ToArray();
+            var retained = references.Retained(candidates, ownedDirectory, prefabPath, metaPath);
 
             foreach (var prevAsset in prevAssets)
             {
@@ -156,6 +166,9 @@ namespace BIEngine.UniXD.Editor
                 var prevAssetPath = AssetDatabase.GetAssetPath(prevAsset);
                 if (string.IsNullOrWhiteSpace(prevAssetPath)) continue;
                 if (newAssetPaths.Contains(prevAssetPath)) continue;
+                // A business prefab can copy a sprite from the generated art.
+                // Changing PNG/SVG mode must not delete that still-live asset.
+                if (retained.Contains(prevAssetPath)) continue;
                 // Metadata may include dependencies redirected outside this panel.
                 if (!prevAssetPath.StartsWith(ownedDirectory.TrimEnd('/', '\\') + "/", StringComparison.OrdinalIgnoreCase)) continue;
 

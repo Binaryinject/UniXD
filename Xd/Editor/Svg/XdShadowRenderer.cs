@@ -16,7 +16,7 @@ namespace BIEngine.UniXD.Xd
         {
             if (node.Visible == false) return false;
             return (node.Style?.Filters ?? Array.Empty<XdFilterJson>()).Any(x =>
-                x.Type == "dropShadow" && (x.Params?.DropShadows?.Length ?? 0) > 0)
+                x.Visible != false && x.Type == "dropShadow" && (x.Params?.DropShadows?.Length ?? 0) > 0)
                 || (node.Group?.Children ?? Array.Empty<XdObjectJson>()).Any(HasShadows);
         }
 
@@ -25,7 +25,7 @@ namespace BIEngine.UniXD.Xd
             float inheritedOpacity = 1f)
         {
             var shadows = (node.Style?.Filters ?? Array.Empty<XdFilterJson>())
-                .Where(x => x.Type == "dropShadow")
+                .Where(x => x.Visible != false && x.Type == "dropShadow")
                 .SelectMany(x => x.Params?.DropShadows ?? Array.Empty<XdDropShadowJson>())
                 .Where(x => x.Color != null && x.Color.ToUnityColor().a > 0f).ToArray();
             if (shadows.Length == 0 || node.Visible == false || obb.Size.x <= 0f || obb.Size.y <= 0f)
@@ -35,7 +35,7 @@ namespace BIEngine.UniXD.Xd
                 return Array.Empty<IElement>();
 
             var grouped = node.Group != null;
-            var svg = SvgUtil.CreateSvg(node, grouped ? obb : null, false, true);
+            var svg = SvgUtil.CreateSvg(node, grouped ? obb : null, false, true, false);
             if (string.IsNullOrEmpty(svg)) return Array.Empty<IElement>();
             var settings = XdImporter.Settings;
             var width = Mathf.Max(1, Mathf.RoundToInt(obb.Size.x * settings.SpriteSaveScale));
@@ -112,7 +112,7 @@ namespace BIEngine.UniXD.Xd
             }
         }
 
-        private static float[] Blur(float[] source, int width, int height, float sigma, bool horizontal)
+        internal static float[] Blur(float[] source, int width, int height, float sigma, bool horizontal)
         {
             if (sigma < 0.001f) return source;
             var radius = Mathf.CeilToInt(3f * sigma);

@@ -24,7 +24,7 @@ namespace BIEngine.UniXD.Xd
             {
                 var requested = XdVectorExport.IsRequested(node, XdImporter.VectorLayerIds);
                 if (requested && !XdVectorExport.IsEligible(node))
-                    throw new BIEngine.UniXD.Editor.ImportException("图层“" + node.Name + "”包含文字、位图或不支持的形状，无法保持矢量渲染。请在合图设置中改为 PNG。");
+                    throw new BIEngine.UniXD.Editor.ImportException("图层“" + node.Name + "”包含文字、位图、内阴影或不支持的形状，无法保持为纯矢量渲染。请在合图设置中改为 PNG。");
                 var vector = requested || inherited;
                 var descendant = false;
                 foreach (var child in node.Group?.Children ?? Array.Empty<XdObjectJson>()) descendant |= Visit(child, vector);

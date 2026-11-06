@@ -32,7 +32,7 @@ namespace BIEngine.UniXD.Xd
         }
 
         [Serializable] private sealed class Rename { public string id, name; }
-        [Serializable] private sealed class Archive { public string[] ids; public Rename[] names; public string[] excluded; public string[] omitted; public string[] ordinaryScrollGroups; public string[] osaScrollGroups; public string[] vectorLayers; }
+        [Serializable] private sealed class Archive { public string[] ids; public Rename[] names; public string[] excluded; public string[] omitted; public string[] ordinaryScrollGroups; public string[] osaScrollGroups; public string[] vectorLayers; public string[] mergedShadowLayers; }
         private static string Key(string file, string board) => "AkyuiXd.Flatten.v1." + BIEngine.UniXD.Editor.ImportFingerprintSession.Hash(
             System.Text.Encoding.UTF8.GetBytes(Application.dataPath.ToLowerInvariant() + "\n" + Path.GetFullPath(file).Replace('\\', '/').ToLowerInvariant() + "\n" + board));
         public static HashSet<string> Load(string file, string board)
@@ -52,6 +52,13 @@ namespace BIEngine.UniXD.Xd
         }
         public static HashSet<string> LoadExcluded(string file, string board) => new HashSet<string>(Read(file, board).excluded ?? Array.Empty<string>());
         public static HashSet<string> LoadOmitted(string file, string board) => new HashSet<string>(Read(file, board).omitted ?? Array.Empty<string>());
+        public static HashSet<string> LoadMergedShadows(string file, string board) => new HashSet<string>(Read(file, board).mergedShadowLayers ?? Array.Empty<string>());
+        public static void SaveMergedShadows(string file, string board, IEnumerable<string> ids)
+        {
+            var archive = Read(file, board);
+            archive.mergedShadowLayers = ids.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            EditorPrefs.SetString(Key(file, board), JsonUtility.ToJson(archive));
+        }
         public static HashSet<string> LoadVectors(string file, string board) => new HashSet<string>(Read(file, board).vectorLayers ?? Array.Empty<string>());
         public static void SaveVectors(string file, string board, IEnumerable<string> ids)
         {

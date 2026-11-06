@@ -31,6 +31,12 @@ namespace BIEngine.UniXD.Xd
         private XdImportSettings _settings;
         private string m_RangeAnchorPath;
 
+        private int m_SortMode;
+        private bool m_EditingExportName;
+        private Dictionary<string,int> m_EditingOrder;
+        private static readonly string[] m_SortNames = { "原始顺序", "反向顺序", "已改名优先" };
+        private string sortKey => "UniXD.ArtboardSort." + BIEngine.UniXD.Editor.ImportFingerprintSession.Hash(System.Text.Encoding.UTF8.GetBytes(Application.dataPath + "\n" + Path.GetFullPath(_xdFilePath)));
+
         public static void Show(string xdFilePath, Action<string[]> onConfirm, Action onCancel, bool forceReimport = false, XdImportSettings settings = null)
         {
             XdImporter.XdArtboardImportOption[] options;
@@ -45,9 +51,9 @@ namespace BIEngine.UniXD.Xd
             var savedSelection = XdArtboardSelectionHistory.Load(xdFilePath);
             var selectedPaths = new HashSet<string>(XdImporter.ResolveSelectedArtboards(options, savedSelection));
             var window = GetWindow<XdArtboardSelectionWindow>(true, "XD · 选择导出画板", true);
-            window.minSize = new Vector2(560, 460);
+            window.minSize = new Vector2(760, 400);
             var mainWindow = EditorGUIUtility.GetMainWindowPosition();
-            var size = window.position.width < 600 ? new Vector2(680, Mathf.Min(720, mainWindow.height - 90)) : window.position.size;
+            var size = window.position.width < 600 ? new Vector2(1000, Mathf.Min(720, mainWindow.height - 90)) : window.position.size;
             window.Initialize(xdFilePath, options, selectedPaths, onConfirm, onCancel);
             window._forceReimport = forceReimport;
             window._settings = settings;
@@ -58,6 +64,7 @@ namespace BIEngine.UniXD.Xd
         private void Initialize(string xdFilePath, IReadOnlyCollection<XdImporter.XdArtboardImportOption> options, HashSet<string> selectedPaths, Action<string[]> onConfirm, Action onCancel)
         {
             _xdFilePath = xdFilePath;
+            m_SortMode = Mathf.Clamp(EditorPrefs.GetInt(sortKey,0),0,2); m_EditingOrder=null;
             _onConfirm = onConfirm;
             _onCancel = onCancel;
             _completed = false;
@@ -80,6 +87,7 @@ namespace BIEngine.UniXD.Xd
                 if (GUILayout.Button("关闭")) Close();
                 return;
             }
+            m_EditingExportName = (GUI.GetNameOfFocusedControl() ?? "").StartsWith("ExportName/",StringComparison.Ordinal);
             var e = Event.current;
             if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape)
             {
@@ -96,11 +104,11 @@ namespace BIEngine.UniXD.Xd
             {
                 using (new EditorGUILayout.VerticalScope(new GUIStyle { padding = new RectOffset(18, 18, 4, 8) }))
                 {
-                    XdEditorStyles.Header("选择导出画板", Path.GetFileName(_xdFilePath));
+                    EditorGUILayout.LabelField("选择导出画板 · " + Path.GetFileName(_xdFilePath),EditorStyles.boldLabel);
                     EditorGUILayout.SelectableLabel(_xdFilePath, XdEditorStyles.PathLabel, GUILayout.Height(18));
-                    GUILayout.Space(9);
+                    GUILayout.Space(2);
                     DrawSearch();
-                    GUILayout.Space(8);
+                    GUILayout.Space(2);
                     DrawToolbar();
                 }
                 DrawList();
@@ -111,7 +119,12 @@ namespace BIEngine.UniXD.Xd
 
         private IEnumerable<ArtboardSelectionState> VisibleItems()
         {
-            return _items.Where(x => (!_onlySelected || x.Selected) &&
+            var ordered = m_SortMode == 1 ? _items.AsEnumerable().Reverse() : m_SortMode == 2
+                ? _items.OrderBy(x => string.IsNullOrWhiteSpace(x.ExportName) ? 1 : 0) : _items.AsEnumerable();
+            var editing = m_EditingExportName;
+            if (editing && m_EditingOrder != null) ordered = ordered.OrderBy(x => m_EditingOrder.TryGetValue(x.Option.ManifestPath,out var index) ? index : int.MaxValue);
+            else if (!editing) m_EditingOrder = ordered.Select((item,index)=>new{item.Option.ManifestPath,index}).ToDictionary(x=>x.ManifestPath,x=>x.index);
+            return ordered.Where(x => (!_onlySelected || x.Selected) &&
                 (string.IsNullOrWhiteSpace(_search) || x.Option.DisplayName.IndexOf(_search.Trim(), StringComparison.OrdinalIgnoreCase) >= 0 ||
                     x.ExportName.IndexOf(_search.Trim(), StringComparison.OrdinalIgnoreCase) >= 0));
         }
@@ -175,6 +188,9 @@ namespace BIEngine.UniXD.Xd
         {
             var visible = VisibleItems().ToArray();
             EditorGUILayout.BeginHorizontal();
+            var sort=EditorGUILayout.Popup(m_SortMode,m_SortNames,GUILayout.Width(110));
+            if(sort!=m_SortMode){m_SortMode=sort;m_EditingOrder=null;_scrollPosition=Vector2.zero;EditorPrefs.SetInt(sortKey,sort);GUI.FocusControl(null);}
+
             EditorGUILayout.LabelField($"画板  {visible.Length} / {_items.Count}", XdEditorStyles.Section, GUILayout.MinWidth(95));
             GUILayout.FlexibleSpace();
             using (new EditorGUI.DisabledScope(visible.Length == 0))
@@ -200,7 +216,7 @@ namespace BIEngine.UniXD.Xd
                     {
                         GUILayout.Space(45);
                         EditorGUILayout.LabelField(_onlySelected ? "当前没有符合条件的已选画板" : "没有找到匹配的画板", XdEditorStyles.CenterTitle);
-                        GUILayout.Space(8);
+                        GUILayout.Space(2);
                         EditorGUILayout.LabelField("试试其他名称，或清除筛选条件。", XdEditorStyles.CenterMuted);
                         GUILayout.Space(12);
                         EditorGUILayout.BeginHorizontal(); GUILayout.FlexibleSpace();
@@ -230,50 +246,23 @@ namespace BIEngine.UniXD.Xd
 
         private void DrawRow(ArtboardSelectionState item, int index)
         {
-            var row = GUILayoutUtility.GetRect(0, 60, GUILayout.ExpandWidth(true));
-            var background = item.Selected ? XdEditorStyles.Selected : XdEditorStyles.Surface;
-            if (!item.Selected && index % 2 == 1) background = Color.Lerp(background, EditorGUIUtility.isProSkin ? Color.black : Color.white, .12f);
-            EditorGUI.DrawRect(row, background);
-            if (item.Selected) EditorGUI.DrawRect(new Rect(row.x, row.y, 3, row.height - 1), XdEditorStyles.Accent);
-            EditorGUI.DrawRect(new Rect(row.x, row.yMax - 1, row.width, 1), XdEditorStyles.Line);
-            var toggleRect = new Rect(row.x + 12, row.y + 21, 18, 18);
-            var range = Event.current.shift;
-            var selected = EditorGUI.Toggle(toggleRect, item.Selected);
-            if (selected != item.Selected) ApplyArtboardSelection(item, selected, range);
-            var renameRect = new Rect(row.x + 40, row.y + 31, row.width - 52, 20);
-            var flattenRect = new Rect(row.xMax - 101, row.y + 5, 89, 21);
-            if (GUI.Button(flattenRect, "合图设置…", EditorStyles.miniButton))
-            {
-                var path = _xdFilePath;
-                var board = item.Option;
-                var settings = _settings;
-                EditorApplication.delayCall += () => XdFlattenWindow.Open(path, board, settings);
-            }
-            var e = Event.current;
-            if (e.type == EventType.MouseDown && e.button == 0 && row.Contains(e.mousePosition) && !toggleRect.Contains(e.mousePosition) && !renameRect.Contains(e.mousePosition) && !flattenRect.Contains(e.mousePosition))
-            {
-                ApplyArtboardSelection(item, !item.Selected, e.shift);
-                GUI.FocusControl(null); e.Use(); Repaint();
-            }
-            var badgeRight = row.xMax - 109;
-            if (item.Option.IsExpandArtboard) badgeRight = DrawBadge(badgeRight, row.y + 13, "展开子项", false);
-            if (item.Option.IsMarkedForExport) badgeRight = DrawBadge(badgeRight, row.y + 13, "已标记", true);
-            var nameRect = new Rect(row.x + 40, row.y + 4, Mathf.Max(20, badgeRight - row.x - 48), 21);
-            GUI.Label(nameRect, new GUIContent(item.Option.DisplayName, item.Option.DisplayName), XdEditorStyles.RowTitle);
-            GUI.Label(new Rect(renameRect.x, renameRect.y, 46, 20), new GUIContent(item.Option.IsExpandArtboard ? "前缀" : "导出名",
-                item.Option.IsExpandArtboard ? "展开画板使用此前缀拼接子元素名称。" : "用于预制体、图片目录和导入记录；留空沿用原名，无需填写文件扩展名。"), XdEditorStyles.PathLabel);
-            var inputRect = new Rect(renameRect.x + 48, renameRect.y, renameRect.width - 90, 20);
-            var controlName = "ExportName/" + item.Option.ManifestPath;
-            GUI.SetNextControlName(controlName);
-            EditorGUI.BeginChangeCheck();
-            var exportName = EditorGUI.TextField(inputRect, item.ExportName);
-            if (EditorGUI.EndChangeCheck()) UpdateExportName(item, exportName);
-            if (string.IsNullOrEmpty(item.ExportName) && GUI.GetNameOfFocusedControl() != controlName)
-                GUI.Label(new Rect(inputRect.x + 4, inputRect.y + 1, inputRect.width - 8, 18),
-                    new GUIContent(XdImporter.GetExportName(item.Option, null, _settings), "留空时使用此名称"), XdEditorStyles.PathLabel);
-            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(item.ExportName)))
-                if (GUI.Button(new Rect(renameRect.xMax - 37, renameRect.y, 37, 20), new GUIContent("还原", "清除自定义名称，恢复 XD 原名。"), EditorStyles.miniButton))
-                { UpdateExportName(item, ""); GUI.FocusControl(null); }
+            var row=GUILayoutUtility.GetRect(0,24,GUILayout.ExpandWidth(true));
+            var background=item.Selected?XdEditorStyles.Selected:XdEditorStyles.Surface;
+            if(!item.Selected&&index%2==1)background=Color.Lerp(background,Color.gray,.08f);
+            EditorGUI.DrawRect(row,background);EditorGUI.DrawRect(new Rect(row.x,row.yMax-1,row.width,1),XdEditorStyles.Line);
+            var y=row.y+3;var range=Event.current.shift;
+            var selected=EditorGUI.Toggle(new Rect(row.x+8,y,18,18),item.Selected);if(selected!=item.Selected)ApplyArtboardSelection(item,selected,range);
+            var sourceWidth=Mathf.Clamp(row.width*.30f,140,300);
+            var nameRect=new Rect(row.x+32,y,sourceWidth-40,18);
+            GUI.Label(nameRect,new GUIContent(item.Option.DisplayName,item.Option.DisplayName+"\n"+item.Option.ManifestPath),EditorStyles.label);
+            if(Event.current.type==EventType.MouseDown&&Event.current.button==0&&nameRect.Contains(Event.current.mousePosition)){ApplyArtboardSelection(item,!item.Selected,Event.current.shift);GUI.FocusControl(null);Event.current.Use();}
+            var input=new Rect(row.x+sourceWidth,y,Mathf.Max(80,row.width-sourceWidth-260),18);
+            var control="ExportName/"+item.Option.ManifestPath;GUI.SetNextControlName(control);EditorGUI.BeginChangeCheck();var value=EditorGUI.TextField(input,item.ExportName);if(EditorGUI.EndChangeCheck())UpdateExportName(item,value);
+            if(string.IsNullOrEmpty(item.ExportName)&&GUI.GetNameOfFocusedControl()!=control)GUI.Label(new Rect(input.x+4,y,input.width-8,18),new GUIContent(XdImporter.GetExportName(item.Option,null,_settings),"导出名称；留空沿用原名"),EditorStyles.miniLabel);
+            if(GUI.Button(new Rect(input.xMax+4,y,20,18),new GUIContent("×","还原导出名称"),EditorStyles.miniButton)){UpdateExportName(item,"");GUI.FocusControl(null);}
+            var status=(item.Option.IsMarkedForExport?"已标记":"")+(item.Option.IsExpandArtboard?" · 展开子项":"");
+            GUI.Label(new Rect(input.xMax+30,y,130,18),new GUIContent(status,status),EditorStyles.miniLabel);
+            if(GUI.Button(new Rect(row.xMax-92,y,84,18),"合图设置…",EditorStyles.miniButton)){var path=_xdFilePath;var board=item.Option;var settings=_settings;EditorApplication.delayCall+=()=>XdFlattenWindow.Open(path,board,settings);}
         }
 
         private void UpdateExportName(ArtboardSelectionState item, string name)
@@ -315,7 +304,7 @@ namespace BIEngine.UniXD.Xd
                 int hiddenSelected = selectedCount - VisibleItems().Count(x => x.Selected);
                 if (hiddenSelected > 0)
                     EditorGUILayout.LabelField($"筛选隐藏了 {hiddenSelected} 个已选画板，它们也会导出。", XdEditorStyles.Muted);
-                GUILayout.Space(9);
+                GUILayout.Space(2);
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label("Ctrl + Enter 导出", XdEditorStyles.PathLabel);
                 GUILayout.FlexibleSpace();
@@ -385,7 +374,9 @@ namespace BIEngine.UniXD.Xd
         private HashSet<string> _collapsed = new HashSet<string>();
         private HashSet<string> _excluded = new HashSet<string>();
         private HashSet<string> _omitted = new HashSet<string>();
+        private HashSet<string> m_MergedShadowLayers = new HashSet<string>();
         private HashSet<string> m_VectorLayers = new HashSet<string>();
+        private static readonly string[] m_GroupRenderModeNames = { "合并为 PNG（Image）", "合并为单个 SVG（SVGImage）" };
         private static readonly string[] m_RenderModeNames = { "转为 PNG（Image）", "保持矢量（SVGImage）" };
         private Dictionary<string, XdScrollViewMode> m_ScrollViewModes = new Dictionary<string, XdScrollViewMode>();
         private static readonly string[] m_ScrollViewModeNames = { "不生成 ScrollView", "普通 ScrollView", "OSA ScrollView" };
@@ -416,21 +407,24 @@ namespace BIEngine.UniXD.Xd
             catch (OperationCanceledException) { return; }
             var window = CreateInstance<XdFlattenWindow>();
             window.titleContent = new GUIContent("合图设置 · " + option.DisplayName);
-            window.minSize = new Vector2(520, 380);
+            window.minSize = new Vector2(760, 380);
             window._file = file; window._board = option.ManifestPath; window._entries = entries;
             window._roots = roots; window._symbols = symbols;
             window._selected = XdFlattenHistory.Load(file, option.ManifestPath);
             window._excluded = XdFlattenHistory.LoadExcluded(file, option.ManifestPath);
             window._omitted = XdFlattenHistory.LoadOmitted(file, option.ManifestPath);
             window.m_VectorLayers = XdFlattenHistory.LoadVectors(file, option.ManifestPath);
+            window.m_MergedShadowLayers = XdFlattenHistory.LoadMergedShadows(file, option.ManifestPath);
             window.m_ScrollViewModes = XdFlattenHistory.LoadScrollViewModes(file, option.ManifestPath);
             window._names = XdFlattenHistory.LoadNames(file, option.ManifestPath);
             window._settings = settings; window._boardOriginal = option.DisplayName;
             window.RefreshExportPreview();
-            window._collapsed = new HashSet<string>(entries.Where(x => window.IsChosen(x.Id)).Select(x => x.Id));
+            window._collapsed = new HashSet<string>(entries.Where(x => window.IsChosen(x.Id) ||
+                window._omitted.Contains(x.Id) || x.Ancestors.Any(window._omitted.Contains)).Select(x => x.Id));
             window.ShowUtility();
             var main = EditorGUIUtility.GetMainWindowPosition();
-            window.position = new Rect(main.center - new Vector2(330, 290), new Vector2(660, 580));
+            var width = Mathf.Min(1120, main.width - 40);
+            window.position = new Rect(main.center - new Vector2(width / 2, 300), new Vector2(width, 600));
         }
 
         private static void CollectSymbols(BIEngine.UniXD.Xd.Parsing.Internal.XdObjectJson node, Dictionary<string, BIEngine.UniXD.Xd.Parsing.Internal.XdObjectJson> symbols)
@@ -444,17 +438,18 @@ namespace BIEngine.UniXD.Xd
         {
             var id = SvgGroupParser.GroupId(node);
             if (string.IsNullOrEmpty(id)) return;
-            bool group = node.Group != null || node.Type == "syncRef";
+            var effective = node.Type == "syncRef" ? XdExportRules.ResolvePreviewNode(node, symbols) : node;
+            bool group = effective.Group != null;
             var scrollingType = node.Meta?.Ux?.ScrollingType;
             // Match GetRefObject.Copy: only null instance values inherit the symbol's metadata.
             if (scrollingType == null && node.Type == "syncRef" && symbols != null && symbols.TryGetValue(node.SyncSourceGuid ?? "", out var source))
                 scrollingType = source.Meta?.Ux?.ScrollingType;
-            entries.Add(new Entry { Id = id, Name = node.Name ?? "未命名图层", Depth = depth, IsGroup = group, IsScrollGroup = !string.IsNullOrWhiteSpace(scrollingType), HasChildren = node.Group?.Children?.Length > 0, Supported = group && SvgGroupParser.CanFlatten(node), Ancestors = ancestors.ToArray() });
+            entries.Add(new Entry { Id = id, Name = effective.Name ?? "未命名图层", Depth = depth, IsGroup = group, IsScrollGroup = !string.IsNullOrWhiteSpace(scrollingType), HasChildren = node.Group?.Children?.Length > 0, Supported = group && SvgGroupParser.HasMergeContent(effective) && SvgGroupParser.CanFlatten(effective), Ancestors = ancestors.ToArray() });
             var children = new List<string>(ancestors) { id };
             foreach (var child in node.Group?.Children ?? Array.Empty<BIEngine.UniXD.Xd.Parsing.Internal.XdObjectJson>()) Collect(child, depth + 1, children, entries, symbols, settings);
         }
 
-        private bool IsChosen(string id) => _previewIds.Contains(id) &&
+        private bool IsChosen(string id) => _previewIds.Contains(id) && m_ResolvedNodes.TryGetValue(id, out var node) && SvgGroupParser.HasMergeContent(node) &&
             (!m_FlattenAllowed.TryGetValue(id, out var allowed) || allowed) &&
             (_selected.Contains(id) || (!_excluded.Contains(id) && _autoEligible.Contains(id)));
 
@@ -482,16 +477,19 @@ namespace BIEngine.UniXD.Xd
             m_FlattenAllowed.Clear();
             m_VectorEligible.Clear();
             m_UsesVector.Clear();
+            var parentsWithChildren = new HashSet<string>(_entries.Where(x=>x.Ancestors.Length>0).Select(x=>x.Ancestors[x.Ancestors.Length-1]));
             foreach (var entry in _entries)
             {
                 if (!nodes.TryGetValue(entry.Id, out var node)) continue;
                 node = XdExportRules.ResolvePreviewNode(node, _previewSymbols);
                 m_ResolvedNodes[entry.Id] = node;
                 m_FlattenAllowed[entry.Id] = XdVectorExport.CanFlatten(node, m_VectorLayers);
-                m_VectorEligible[entry.Id] = XdVectorExport.IsEligible(node);
+                m_VectorEligible[entry.Id] = XdVectorExport.IsEligible(node) || XdVectorExport.IsRequested(node, m_VectorLayers);
                 m_UsesVector[entry.Id] = XdVectorExport.UsesVector(node, m_VectorLayers);
-                entry.Supported = entry.IsGroup && SvgGroupParser.CanFlatten(node);
-                if (entry.IsGroup && m_FlattenAllowed[entry.Id] && _settings != null && _settings.GroupParsers.Any(parser => parser.IsAutomaticFlatten(node)))
+                entry.IsGroup = node.Group != null;
+                entry.HasChildren = parentsWithChildren.Contains(entry.Id);
+                entry.Supported = entry.IsGroup && SvgGroupParser.HasMergeContent(node) && SvgGroupParser.CanFlatten(node);
+                if (entry.Supported && m_FlattenAllowed[entry.Id] && _settings != null && _settings.GroupParsers.Any(parser => parser.IsAutomaticFlatten(node)))
                     _autoEligible.Add(entry.Id);
             }
             InvalidateDisplay();
@@ -499,6 +497,7 @@ namespace BIEngine.UniXD.Xd
 
         private void SetChosen(Entry entry, bool value)
         {
+            if (value && !CanToggleMerge(entry)) return;
             if (value) { _selected.Add(entry.Id); _excluded.Remove(entry.Id); _collapsed.Add(entry.Id); }
             else { _selected.Remove(entry.Id); _excluded.Add(entry.Id); _collapsed.Remove(entry.Id); }
             XdFlattenHistory.Save(_file, _board, _selected);

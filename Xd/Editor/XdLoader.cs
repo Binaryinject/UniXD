@@ -282,7 +282,8 @@ namespace BIEngine.UniXD.Xd
                 {
                     var source = _sourceGuidToObject[xdObject.SyncSourceGuid];
                     newXdObjectJson = (XdObjectJson) Copy(typeof(XdObjectJson), xdObject, source);
-                    newXdObjectJson.Name = source.Name;
+                    newXdObjectJson.Id = xdObject.Id ?? xdObject.Guid ?? source.Id;
+                    newXdObjectJson.Name = string.IsNullOrEmpty(xdObject.Name) ? source.Name : xdObject.Name;
                     newXdObjectJson.Type = source.Type;
                     newXdObjectJson.Shape = source.Shape; // compoundのchildrenだけ上書きされるケースがあるが計算出来ないので戻す
                 }
@@ -497,6 +498,13 @@ namespace BIEngine.UniXD.Xd
                     if (xdObject.Group != null)
                     {
                         generatedChildren = Render(xdObject.Group.Children, originalObb, parents.Concat(new[] { xdObject }).ToArray());
+                    }
+
+                    if (generatedChildren.Length == 0 && shadows.Count > 0 && XdImporter.MergedShadowLayerIds.Contains(SvgGroupParser.GroupId(xdObject)))
+                    {
+                        var merged = XdMergedShadowRenderer.Merge(position, size, rotation, components, shadows, _xdAssetHolder, Assets, Elements);
+                        position = merged.position; size = merged.size;
+                        shadows.Clear();
                     }
 
                     var group = new ObjectElement(

@@ -185,7 +185,8 @@ namespace BIEngine.UniXD.Xd
                     if (!active.Add(reference)) return ShallowCopy(node);
                     entered = true;
                     effective = (XdObjectJson)MergeNamingElement(typeof(XdObjectJson), node, source);
-                    effective.Name = source.Name;
+                    effective.Id = node.Id ?? node.Guid ?? source.Id;
+                    effective.Name = string.IsNullOrEmpty(node.Name) ? source.Name : node.Name;
                     effective.Type = source.Type;
                     effective.Shape = source.Shape;
                 }

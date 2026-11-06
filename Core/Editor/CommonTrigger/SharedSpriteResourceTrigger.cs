@@ -490,6 +490,9 @@ namespace BIEngine.UniXD.CommonTrigger
 
         private void PruneUnusedShared()
         {
+            // Destruction must not rely on an incremental index alone: an import
+            // interruption or an external edit can leave document owners absent.
+            m_Index.ScanDocuments();
             var candidates = m_Index.images.Values.Where(i => Priority(i.path) == 1
                 && !m_Index.Owners(i.guid).Any(p => !m_ManagedAtlases.Contains(p) || !p.StartsWith(m_Shared + "/", StringComparison.Ordinal))).ToArray();
             if (candidates.Length == 0) return;

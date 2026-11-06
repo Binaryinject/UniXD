@@ -52,6 +52,7 @@ namespace BIEngine.UniXD.Xd
                 else if (component is IListComponent) names.AddRange(new[] { "ScrollRect", "RectMask2D" });
             }
             foreach (var trigger in triggers) trigger.PreviewAdditionalComponents(names);
+            if (XdInnerShadowRenderer.HasShadows(node)) names.Add("内阴影（合入 PNG，尺寸不变）");
             if (hasShadows) names.Add("软阴影（独立装饰层，不拦截点击）");
             return names.Count == 0 ? "无（普通分组）" : string.Join("、", names.Distinct());
         }

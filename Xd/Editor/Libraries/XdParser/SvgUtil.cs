@@ -40,10 +40,10 @@ namespace BIEngine.UniXD.Xd.Parsing
             return true;
         }
 
-        public static string CreateSvg(XdObjectJson xdObject, [CanBeNull] Obb obb, bool allowEmpty, bool includeBitmaps = false)
+        public static string CreateSvg(XdObjectJson xdObject, [CanBeNull] Obb obb, bool allowEmpty, bool includeBitmaps = false, bool includeInnerShadows = true)
         {
             var defs = new List<IDefElement>();
-            var body = CreateSvgLine(xdObject, defs, includeBitmaps);
+            var body = CreateSvgLine(xdObject, defs, includeBitmaps, includeInnerShadows);
 
             if (!allowEmpty)
             {
@@ -64,7 +64,9 @@ namespace BIEngine.UniXD.Xd.Parsing
                     Body = body,
                     Size = null,
                 };
-                var bounds = CalcBounds(rootForCalc.ToSvg());
+                var bounds = includeInnerShadows && includeBitmaps && XdInnerShadowRenderer.HasShadows(xdObject)
+                    ? CalcBounds(CreateSvg(xdObject, null, true, includeBitmaps, false))
+                    : CalcBounds(rootForCalc.ToSvg());
                 if (bounds.width > 0.0001f && bounds.height > 0.0001f)
                 {
                     body.Parameter.Transform.Value.Tx = -bounds.x;
@@ -113,7 +115,7 @@ namespace BIEngine.UniXD.Xd.Parsing
             if (node.Children != null) foreach (var child in node.Children) CollectTextures(child, textures);
         }
 
-        private static IElement CreateSvgLine(XdObjectJson xdObject, List<IDefElement> defs, bool includeBitmaps = false)
+        private static IElement CreateSvgLine(XdObjectJson xdObject, List<IDefElement> defs, bool includeBitmaps = false, bool includeInnerShadows = true)
         {
             var id = xdObject.GetOriginalSimpleName().Replace(" ", "_");
             var dataName = xdObject.GetOriginalSimpleName();
@@ -135,15 +137,28 @@ namespace BIEngine.UniXD.Xd.Parsing
                 {
                     var clipPathId = $"clip-path{defs.Count}";
                     parameter.ClipPath = $"url(#{clipPathId})";
-                    var clipPathChildren = xdObject.Meta.Ux.ClipPathResources.Children.Select(x => CreateSvgLine(x, defs, includeBitmaps));
+                    var clipPathChildren = xdObject.Meta.Ux.ClipPathResources.Children.Select(x => CreateSvgLine(x, defs, includeBitmaps, includeInnerShadows));
                     defs.Add(new ClipPathDefElement { Id = clipPathId, Children = clipPathChildren.ToArray() });
                 }
 
                 parameter.DataName = dataName;
                 var blendMode = xdObject.Style?.BlendMode;
                 var isolation = xdObject.Style?.Isolation;
-                var children = xdObject.Group.Children.Where(x => !includeBitmaps || x.Visible != false).Select(x => CreateSvgLine(x, defs, includeBitmaps)).ToArray();
+                var children = xdObject.Group.Children.Where(x => !includeBitmaps || x.Visible != false).Select(x => CreateSvgLine(x, defs, includeBitmaps, includeInnerShadows)).ToArray();
                 return new GroupElement { Parameter = parameter, Children = children, BlendMode = blendMode, Isolation = isolation };
+            }
+
+            if (includeBitmaps && includeInnerShadows && XdInnerShadowRenderer.HasOwnShadow(xdObject))
+            {
+                var source = CreateSvg(xdObject, null, true, true, false);
+                var bounds = CalcBounds(source);
+                if (bounds.width > 0 && bounds.height > 0) {
+                    var bytes = XdInnerShadowRenderer.Render(source, bounds.size, xdObject, XdImporter.Settings);
+                    var bitmapId = "inner-shadow" + defs.Count;
+                    defs.Add(new BitmapDef { Xml = FormattableString.Invariant($"<pattern id='{bitmapId}' patternUnits='userSpaceOnUse' x='{bounds.x:R}' y='{bounds.y:R}' width='{bounds.width:R}' height='{bounds.height:R}'><image x='{bounds.x:R}' y='{bounds.y:R}' width='{bounds.width:R}' height='{bounds.height:R}' preserveAspectRatio='none' xlink:href='data:image/png;base64,{Convert.ToBase64String(bytes)}'/></pattern>") });
+                    parameter.EnableFill = true; parameter.Fill = Color.white; parameter.FillUrl = bitmapId;
+                    return new EffectBitmapElement { Parameter = parameter, Bounds = bounds };
+                }
             }
 
             var fill = xdObject.Style?.Fill;
@@ -620,6 +635,12 @@ namespace BIEngine.UniXD.Xd.Parsing
         {
             public string Xml;
             public string ToSvg() => Xml;
+        }
+
+        private sealed class EffectBitmapElement : IElement {
+            public ElementParameter Parameter { get; set; }
+            public Rect Bounds;
+            public string ToSvg() => FormattableString.Invariant($"<rect {Parameter.GetString()} x='{Bounds.x:R}' y='{Bounds.y:R}' width='{Bounds.width:R}' height='{Bounds.height:R}'/>");
         }
 
         private class RootElement : IElement

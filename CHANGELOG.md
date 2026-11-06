@@ -21,3 +21,16 @@
 - Cache import work and virtualize large layer lists; support Shift range toggles in artboard and layer windows.
 
 This is a new maintenance line. See README and Documentation~ for upstream baselines and compatibility limits.
+
+
+## 2026-11-06
+- Added per-merge outer-shadow output selection with separate layers as the backward-compatible default; combined PNG bounds include blur, offsets and rotation.
+- Clarified single-SVG group export in the flatten window.
+- Added clipped inner shadows for shape/image fills and flattened groups, including original-alpha and geometry preservation, bounded pixel caching and regression coverage.
+
+- Protect shared and copied sprite references before removing unused export resources, using a batched reverse-dependency index.
+- Cache immutable artboard options with XD content-hash invalidation.
+- Preserve referenced-layer source names and per-instance rename IDs; reject empty or leaf merge selections.
+- Compact artboard and layer settings into single-line rows, with hierarchy guides, component icons and original/reverse/renamed-first artboard sorting.
+- Collapse omitted subtrees when opening settings and immediately after marking them omitted; allow manual expansion afterward.
+- Add portable reference-safety, reference-name, merge-eligibility, sorting and shadow regression tests.

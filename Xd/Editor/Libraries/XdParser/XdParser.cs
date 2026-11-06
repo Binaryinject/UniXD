@@ -204,12 +204,14 @@ namespace BIEngine.UniXD.Xd.Parsing.Internal
     public class XdFilterJson : IXdJsonElement
     {
         [DataMember(Name = "type")] public string Type { get; set; }
+        [DataMember(Name = "visible")] public bool? Visible { get; set; }
         [DataMember(Name = "params")] public XdFilterParamsJson Params { get; set; }
     }
 
     public class XdFilterParamsJson : IXdJsonElement
     {
         [DataMember(Name = "dropShadows")] public XdDropShadowJson[] DropShadows { get; set; }
+        [DataMember(Name = "innerShadows")] public XdDropShadowJson[] InnerShadows { get; set; }
     }
 
     public class XdDropShadowJson : IXdJsonElement
