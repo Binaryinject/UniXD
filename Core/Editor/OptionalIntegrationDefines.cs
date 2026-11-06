@@ -20,6 +20,7 @@ namespace BIEngine.UniXD.Editor {
             var path = CompilationPipeline.GetAssemblyDefinitionFilePathFromAssemblyName(name);
             return !string.IsNullOrEmpty(path) && AssetDatabase.LoadAssetAtPath<UnityEditorInternal.AssemblyDefinitionAsset>(path) != null;
         }
+        [MenuItem("Tools/UniXD/Refresh Optional Integration Support")]
         public static void Refresh() {
             var group = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
             if (group == BuildTargetGroup.Unknown) return;
@@ -37,7 +38,10 @@ namespace BIEngine.UniXD.Editor {
         }
         private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] from) {
             if (imported.Concat(deleted).Concat(moved).Concat(from).Any(p => p.EndsWith(".asmdef", StringComparison.OrdinalIgnoreCase)
-                || p.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase) || p.EndsWith("packages-lock.json", StringComparison.OrdinalIgnoreCase))) Schedule();
+                || p.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase) || p.EndsWith("packages-lock.json", StringComparison.OrdinalIgnoreCase))) {
+                if (EditorApplication.isCompiling) Schedule();
+                else Refresh();
+            }
         }
     }
 }

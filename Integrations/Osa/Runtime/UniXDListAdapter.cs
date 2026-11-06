@@ -43,7 +43,7 @@ public class UniXDListAdapter : OSA<BaseParams, UniXDItemViewsHolder> {
 
     protected override void UpdateViewsHolder(UniXDItemViewsHolder newOrRecycled) {
         updateViewsHolder?.Invoke(newOrRecycled);
-        
+
     }
 
     protected override void CollectItemsSizes(ItemCountChangeMode changeMode, int count, int indexIfInsertingOrRemoving, ItemsDescriptor itemsDesc) {

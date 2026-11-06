@@ -66,7 +66,7 @@ https://github.com/Binaryinject/UniXD.git
 
 - 安装 OSA 的 `OSA.Core` 后，通过 `UNIXD_OSA_SUPPORT` 编译独立 OSA 后端及通用 `BIEngine.UniXD.Osa.UniXDListAdapter` / `UniXDGridAdapter`。普通 ScrollView 不经过 OSA；选择 OSA 而缺少依赖时，导出明确报错，不修改为其他列表。
 - 安装 PrimeTween 后，通过 `UNIXD_PRIMETWEEN_SUPPORT` 编译包内 `BIEngine.UniXD.ButtonFeedback`。UPM 使用 `com.kyrylokuzyk.primetween` 版本检测；编辑器也检测程序集定义，兼容当前 Asset Store 安装方式。未安装时反馈 Trigger 不添加组件。
-- 编辑器依据 `OSA.Core` / `PrimeTween.Runtime` 的程序集定义维护当前构建目标的支持宏，切换目标时重新检测。两个第三方库均需自行安装，不是 UniXD 强制依赖，也不随本仓库分发。
+- 编辑器依据 `OSA.Core` / `PrimeTween.Runtime` 的程序集定义维护当前构建目标的支持宏，切换目标时重新检测；可通过 **Tools → UniXD → Refresh Optional Integration Support** 手动刷新。若在关闭编辑器时直接从磁盘移除 Asset Store 依赖，需同时清除其支持宏，避免首次启动时旧宏仍启用依赖代码。两个第三方库均需自行安装，不是 UniXD 强制依赖，也不随本仓库分发。
 - 当前项目的全局 `UIListAdapter` / `UIGridAdapter`（提供 `ConfigureForExport`）及 `BIEngine.UIPanelStack.ButtonFeedback` 优先复用；缺少时才使用包内组件。既有反馈组件的参数保持不变，也不会在同一按钮重复添加包内和项目两种反馈。
 - 通用 OSA 适配器提供 `Action` 回调，不要求 R3；列表用 `updateViewsHolder`、`createViewsHolder`、`collectItemsSizes`，网格用 `updateCellViewsHolder`。运行时数据量仍由业务通过 OSA API 设置。
 
