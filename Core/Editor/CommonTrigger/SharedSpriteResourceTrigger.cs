@@ -326,6 +326,10 @@ namespace BIEngine.UniXD.CommonTrigger
         {
             if (m_Index.pending.Count == 0) return;
             m_Index.SaveJournal(m_IndexPath);
+            // Flush dirty loaded assets before discovering owners. Import callbacks
+            // and the incremental registry alone cannot authorize source deletion.
+            AssetDatabase.SaveAssets();
+            m_Index.ScanDocuments();
             // An atlas must release a duplicate rather than replace it with the
             // canonical sprite, which already belongs to its own atlas.
             RepairAtlasOwnership(new HashSet<string>(m_Index.pending.Select(p => p.source), StringComparer.Ordinal));
@@ -356,15 +360,24 @@ namespace BIEngine.UniXD.CommonTrigger
             var affected = new HashSet<string>(replacements.Keys.SelectMany(m_Index.Owners), StringComparer.Ordinal);
             foreach (var path in affected) m_Index.ReplaceReferences(path, replacements, objectMap);
             foreach (var component in Resources.FindObjectsOfTypeAll<Component>())
-                if (component != null && !EditorUtility.IsPersistent(component) && component.gameObject.scene.IsValid()
-                    && SharedSpriteIndex.ReplaceObjectReferences(component, objectMap, true))
+            {
+                if (component == null) continue;
+                var persistent = EditorUtility.IsPersistent(component);
+                if (persistent ? !affected.Contains(AssetDatabase.GetAssetPath(component)) : !component.gameObject.scene.IsValid()) continue;
+                if (SharedSpriteIndex.ReplaceObjectReferences(component, objectMap, !persistent) && !persistent)
                     EditorSceneManager.MarkSceneDirty(component.gameObject.scene);
+            }
+            AssetDatabase.SaveAssets();
+            // A save callback or a dirty cached prefab can restore an old pointer.
+            // Check committed files AFTER saving, and keep the source/journal if any
+            // owner remains. Scan stamps once per migration batch, never per sprite.
+            m_Index.ScanDocuments();
+            foreach (var path in affected) m_Index.RefreshDocument(path, true);
             foreach (var source in replacements.Keys)
-                if (m_Index.Owners(source).Any()) throw new IOException("Shared 迁移后仍存在旧引用: " + source);
+                if (m_Index.Owners(source).Any()) throw new IOException("Shared 迁移保存后仍存在旧引用，保留原资源: " + source);
             var targets = m_Index.pending.ToDictionary(p => p.source, p => p.target, StringComparer.Ordinal);
             foreach (var binding in m_Index.bindings.Values)
                 if (targets.TryGetValue(binding.guid, out var target)) { binding.guid = target; m_Index.MarkDirty(); }
-            AssetDatabase.SaveAssets();
             // Reference commits precede source deletion. The journal remains durable
             // until every deletion succeeds, including interruption between deletions.
             var deleted = new List<string>();
@@ -500,6 +513,7 @@ namespace BIEngine.UniXD.CommonTrigger
         {
             // Destruction must not rely on an incremental index alone: an import
             // interruption or an external edit can leave document owners absent.
+            AssetDatabase.SaveAssets();
             m_Index.ScanDocuments();
             var candidates = m_Index.images.Values.Where(i => Priority(i.path) == 1
                 && !m_Index.Owners(i.guid).Any(p => !m_ManagedAtlases.Contains(p) || !p.StartsWith(m_Shared + "/", StringComparison.Ordinal))).ToArray();
@@ -728,12 +742,12 @@ namespace BIEngine.UniXD.CommonTrigger
         internal static string Stamp(string path) { var file = new FileInfo(path); return file.Length + ":" + file.LastWriteTimeUtc.Ticks; }
         internal static string Hash(byte[] bytes) { using (var sha = SHA256.Create()) return Convert.ToBase64String(sha.ComputeHash(bytes)); }
 
-        internal void RefreshDocument(string path)
+        internal void RefreshDocument(string path, bool force = false)
         {
             if (!m_Extensions.Contains(Path.GetExtension(path))) return;
             if (!File.Exists(path)) { RemoveDocument(path); return; }
             var stamp = Stamp(path);
-            if (documents.TryGetValue(path, out var existing) && existing.stamp == stamp) return;
+            if (!force && documents.TryGetValue(path, out var existing) && existing.stamp == stamp) return;
             var refs = ReadReferences(path);
             SetDocument(new Document { path = path, stamp = stamp, references = refs });
         }

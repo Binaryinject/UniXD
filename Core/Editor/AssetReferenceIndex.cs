@@ -33,9 +33,11 @@ namespace BIEngine.UniXD.Editor {
             // Saving generated prefabs need not have delivered an import callback yet.
             Refresh(prefab); Refresh(meta);
             m_Revision = AssetReferenceChanges.revision;
+            // Aliased assets can be absent from the new asset list but still be
+            // used by the saved art prefab. Only obsolete metadata is excluded.
             return new HashSet<string>(candidates.Where(path => m_Owners.TryGetValue(path, out var owners)
-                && owners.Any(owner => owner != prefab && owner != meta
-                    && !owner.StartsWith(directory.TrimEnd('/', '\\') + "/", StringComparison.OrdinalIgnoreCase))), StringComparer.OrdinalIgnoreCase);
+                && owners.Any(owner => owner == prefab || (owner != meta
+                    && !owner.StartsWith(directory.TrimEnd('/', '\\') + "/", StringComparison.OrdinalIgnoreCase)))), StringComparer.OrdinalIgnoreCase);
         }
     }
     internal sealed class AssetReferenceChanges : AssetPostprocessor {

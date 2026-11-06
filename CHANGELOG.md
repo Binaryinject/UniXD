@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve sprite references during shared-resource migration: discover missing owners, verify committed files after saving, retain sources and recovery journals on failure, and protect sprites still used by the generated prefab.
 - Fix tolerant nine-slicing incorrectly treating long RGB/alpha gradients as repeated stripes; bound the entire candidate run.
 - Preserve original encoded bytes when slicing makes no changes; avoid unnecessary PNG/JPEG encoding and output texture allocation.
 - Optimize managed exact comparisons, row copying, temporary mipmaps and PNG dimension reads; invalidate legacy processed-cache results.
